@@ -59,7 +59,7 @@ from geo_engine.models import slugify, utcnow
 
 ensure_base_dirs()
 
-app = FastAPI(title="GEO Web API", version="1.0.0")
+app = FastAPI(title="GEO Web API", version="1.0.0", redirect_slashes=False)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS or ["*"],
