@@ -1,148 +1,189 @@
-# GEO 引擎（生成式引擎优化）
+# GEO Engine (Generative Engine Optimization)
 
-帮助企业把专业内容与数据，整理成**生成式 AI 引擎（ChatGPT、文心、通义、Perplexity 等）易于抓取、理解并引用**的标准化格式，并持续监测企业在 AI 生成回答中的展现情况。
+Help enterprises turn their professional content and data into **standardized formats that generative AI engines (ChatGPT, ERNIE, Qwen, Perplexity, etc.) can crawl, understand, and cite**, and continuously monitor how the business shows up in AI-generated answers.
 
-零第三方依赖，纯 Python 标准库实现，开箱即用：默认走**离线启发式**抽取/增强/监测，无需任何 API Key 即可跑通全链路；接入真实大模型只需改一处配置（`provider: openai_compat`）。
-
----
-
-## 已实现的六大能力
-
-| 能力 | 模块 | 说明 |
-|------|------|------|
-| 1. 结构化整理 | `structure.py` + `chunker.py` + `ingest.py` | 多源读取 → 语义分块 → 抽取实体/事实卡/问答对/术语表 → 构建知识图谱 → 质量评分 |
-| 2. 自动化分发 | `distribute.py` + `pipeline.py` | 增量发布到本地静态站/Git/HTTP/IndexNow；调度器可周期巡检 |
-| 3. 内容语义增强 | `semantic.py` | 可引用片段优化、权威信息标注、答案优先改写、实体对齐、意图覆盖分析 |
-| 4. 标准化格式输出 | `formats/` | `llms.txt` / `llms-full.txt` / JSON-LD（Organization·FAQ·Glossary·Facts·KnowledgeGraph）/ 知识卡片 / 静态站点 / sitemap |
-| 5. 效果监测 | `monitor.py` | 多引擎探测（离线自检/OpenAI 兼容/搜索 API）、引用率·提及率·声量份额 SOV·趋势·情感 |
-| 6. 可扩展性 | `registry.py` + `config.py` | 组件注册表 + 配置驱动；业务线 = 一份 JSON；Reader/Chunker/LLM/Extractor/Publisher/Probe 全部插件化 |
+Zero third-party dependencies — pure Python standard library. Works out of the box: the default **offline heuristic** path does extraction / enhancement / monitoring with no API key required; switching to a real LLM is a one-line config change (`provider: openai_compat`).
 
 ---
 
-## 快速开始
+## Why GEO
+
+Traditional SEO optimizes for blue links on search result pages. GEO (Generative Engine Optimization) optimizes for being **cited inside the generated answer** — the new surface where users actually get their answers. This engine structures your authoritative content so that when an AI engine is asked a question in your domain, it finds, trusts, and quotes you.
+
+---
+
+## Implemented capabilities
+
+| # | Capability | Module | What it does |
+|---|------------|--------|--------------|
+| 1 | Structured organization | `structure.py` + `chunker.py` + `ingest.py` | Multi-source ingest → semantic chunking → extract entities / fact cards / Q&A pairs / glossary → build knowledge graph → quality scoring |
+| 2 | Automated distribution | `distribute.py` + `pipeline.py` | Incremental publish to local static site / Git / HTTP / IndexNow; scheduler can periodically re-run |
+| 3 | Semantic enhancement | `semantic.py` | Citable-snippet optimization, authority annotation, answer-first rewriting, entity alignment, intent-coverage analysis |
+| 4 | Standardized output | `formats/` | `llms.txt` / `llms-full.txt` / JSON-LD (Organization · FAQ · Glossary · Facts · KnowledgeGraph) / knowledge cards / static site / sitemap |
+| 5 | Effectiveness monitoring | `monitor.py` | Multi-engine probing (offline self-check / OpenAI-compat / search API), citation rate · mention rate · share-of-voice (SOV) · trend · sentiment |
+| 6 | Extensibility | `registry.py` + `config.py` | Component registry + config-driven design; a business line = one JSON file; Reader / Chunker / LLM / Extractor / Publisher / Probe are all pluggable |
+
+---
+
+## Quick start
 
 ```bash
-# 1) 环境自检（打印已注册组件、目录、业务线）
+# 1) Environment self-check (prints registered components, dirs, business lines)
 python -m geo_engine --root . check
 
-# 2) 列出所有业务线
+# 2) List all business lines
 python -m geo_engine --root . list
 
-# 3) 跑通某条业务线全链路：接入→整理→增强→构建→分发→监测→报表
+# 3) Run one business line end-to-end: ingest → structure → enhance → build → distribute → monitor → report
 python -m geo_engine --root . run --bl weakcurrent
 
-# 4) 一次跑全部业务线
+# 4) Run all business lines at once
 python -m geo_engine --root . run --all
 
-# 5) 只跑某些阶段（断点续跑 / 调试）
+# 5) Run only some stages (resume / debug)
 python -m geo_engine --root . run --bl weakcurrent --stages structure enhance build
 
-# 6) 运行冒烟测试
+# 6) Run smoke tests
 python -m tests.test_smoke
 ```
 
-> 运行环境：项目自带 Python 3.13（`.workbuddy/binaries/python/versions/3.13.12/python.exe`）。
+> Requires Python 3.8+ (developed and tested on Python 3.13). No `pip install` needed.
 
 ---
 
-## 目录约定
+## Directory layout
 
 ```
 <root>/
-  config.json                全局配置（llm/monitor/log_level/layout，可选）
-  business_lines/*.json      每条业务线一份配置（多业务线接入点）
-  content/<bl_id>/           该业务线的原始内容（.md / .txt / .csv / .jsonl / .html）
-  dist/<bl_id>/              生成的发布产物（llms.txt、JSON-LD、知识卡片、站点）
-  data/geo.db                SQLite 存储（文档/块/事实/问答/探测结果，支撑续跑与审计）
-  reports/<bl_id>/           效果监测报表（Markdown + HTML 看板）
+  config.json                Global config (llm / monitor / log_level / layout; optional)
+  business_lines/*.json      One config per business line (the multi-tenant entry point)
+  content/<bl_id>/           Raw content for that line (.md / .txt / .csv / .jsonl / .html)
+  dist/<bl_id>/              Generated artifacts (llms.txt, JSON-LD, knowledge cards, site)
+  data/geo.db                SQLite store (docs / chunks / facts / qa / probe results; enables resume + audit)
+  reports/<bl_id>/           Monitoring reports (Markdown + HTML dashboard)
 ```
 
 ---
 
-## 新增一条业务线（可扩展性示范）
+## Add a business line (extensibility demo)
 
-1. 在 `business_lines/` 下新建 `<bl_id>.json`：
+1. Create `<bl_id>.json` under `business_lines/`:
 
 ```json
 {
   "id": "myline",
-  "name": "某业务线",
-  "description": "一句话定位",
+  "name": "Some Business Line",
+  "description": "One-line positioning",
   "domain": "www.example.com",
   "authority": {
-    "org_legal_name": "示例科技有限公司",
+    "org_legal_name": "Example Technology Co., Ltd.",
     "website": "https://www.example.com",
     "certifications": ["ISO9001", "CCC"]
   },
   "sources": [
     {"type": "markdown_dir", "path": "content/myline"},
-    {"type": "text", "options": {"content": "可直接贴的结构化文本", "title": "服务承诺"}}
+    {"type": "text", "options": {"content": "Structured text you can paste inline", "title": "Service Promise"}}
   ],
   "targets": [
     {"type": "local_static", "options": {"dir": "dist/myline"}}
   ],
   "monitor": {
     "engine": "heuristic",
-    "queries": ["用户最可能问的 5~10 个问题？"]
+    "queries": ["The 5~10 questions users most likely ask?"]
   }
 }
 ```
 
-2. 把原始内容放进 `content/myline/`，执行 `run --bl myline` 即可。
+2. Drop raw content into `content/myline/`, then run `run --bl myline`.
 
 ---
 
-## 标准化输出说明（为什么 AI 更爱引用）
+## Standardized outputs (why AI cites you more)
 
-- **`llms.txt` + `llms-full.txt`**：仿 Ansible/llmstxt.org 规范，给爬虫一份"机器可读的站点地图 + 可引用事实清单"，比让 AI 自己从 HTML 里猜更可控。
-- **JSON-LD（schema.org）**：`Organization`/`FAQPage`/`DefinedTerm`/`Dataset`/`Graph` 五类结构化数据，直接喂给支持结构化抽取的引擎，并标注 `author`/`dateModified`/`citation` 以建立权威性。
-- **知识卡片（`cards/*.md`）**：每条事实/问答一张自足、带主体名+时间+关键指标的可引用片段，降低被截断或误归属的概率。
-
----
-
-## 接入真实大模型（可选）
-
-把全局或业务线 `llm.provider` 改为 `openai_compat`，并配置 `base_url` / `api_key` / `model`：
-- 结构化抽取（`structure`）与语义增强（`semantic`）会改用大模型，质量显著提升；
-- 监测 `monitor.engine` 可改为 `openai_compat` / `search_api`，对接真实引擎与搜索 API。
-
-离线 `heuristic` 模式下所有环节均可运行，仅抽取精度弱于大模型。
+- **`llms.txt` + `llms-full.txt`**: Following the [llmstxt.org](https://llmstxt.org) spec — a machine-readable sitemap + citable-fact list for crawlers, far more controllable than letting an AI guess from raw HTML.
+- **JSON-LD (schema.org)**: `Organization` / `FAQPage` / `DefinedTerm` / `Dataset` / `Graph` structured data, fed directly to engines that support structured extraction, with `author` / `dateModified` / `citation` to establish authority.
+- **Knowledge cards (`cards/*.md`)**: One self-contained, citable snippet per fact / Q&A, carrying org name + date + key metrics — reducing the chance of truncation or misattribution.
 
 ---
 
-## 效果监测指标口径
+## Connect a real LLM (optional)
 
-| 指标 | 含义 |
-|------|------|
-| 提及率 mention_rate | 回答中出现品牌/产品的比例 |
-| 引用率 citation_rate | 回答引用本站域名的比例 |
-| 平均引用位次 rank | 越小越靠前（仅统计已引用） |
-| 声量份额 SOV | 本站引用数 /（本站 + 竞品引用数） |
-| 趋势 trend | 近 7 天相对上一周期的引用率变化 |
-| 意图覆盖 coverage | informational/commercial/transactional 等意图的覆盖度，列出缺口 |
+Change the global or per-line `llm.provider` to `openai_compat` and set `base_url` / `api_key` / `model`:
+- Structured extraction (`structure`) and semantic enhancement (`semantic`) switch to the LLM, with significantly higher quality.
+- Monitoring `monitor.engine` can switch to `openai_compat` / `search_api` to hit real engines and search APIs.
 
-> 离线 `heuristic` 引擎的"探测"是用本地知识资产库去回答监测问题，用于回答"AI 来抓我们时找得到素材吗"；接入真实引擎后数据即贴近现实。
+The offline `heuristic` mode runs every stage; it only trails the LLM in extraction precision.
 
 ---
 
-## 模块索引
+## Monitoring metrics
+
+| Metric | Meaning |
+|--------|---------|
+| Mention rate | Share of answers that mention the brand / product |
+| Citation rate | Share of answers that cite this site's domain |
+| Avg. citation rank | Lower = more prominent (cited answers only) |
+| Share of voice (SOV) | This site's citations ÷ (this site + competitors' citations) |
+| Trend | Citation-rate change over the last 7 days vs. prior period |
+| Intent coverage | coverage of informational / commercial / transactional intents, with gaps listed |
+
+> The offline `heuristic` engine's "probe" answers the monitoring questions from your local knowledge-asset store — it tells you "when an AI crawls us, will it find material?". After wiring a real engine, the numbers reflect reality.
+
+---
+
+## Module index
 
 ```
 geo_engine/
-  models.py        数据模型（BusinessLine / FactCard / QAPair / Term / KnowledgeGraph / ProbeResult / MetricsSnapshot）
-  registry.py      组件注册中心（插件化核心）
-  config.py        配置系统（多业务线 + 路径布局）
-  store.py         SQLite 存储层（断点续跑 + 审计）
-  llm.py           LLM Provider 抽象（heuristic / openai_compat）
-  logutil.py       日志
-  ingest.py        内容接入（reader 插件：markdown_dir/file/text/csv/jsonl/url/api）
-  chunker.py       语义分块
-  structure.py     结构化整理（实体/事实/问答/术语/图谱/质量评分）
-  semantic.py      语义增强（可引用化/权威标注/答案优先/意图覆盖）
-  formats/         标准化输出（llms.txt / JSON-LD / 卡片 / 站点 / sitemap）
-  distribute.py    自动化分发（publisher 插件 + 增量 + 调度）
-  monitor.py       效果监测（probe 插件 + 指标计算 + 报表）
-  pipeline.py      端到端编排（7 阶段）
-  cli.py           命令行入口
-tests/test_smoke.py 冒烟测试（10 项，覆盖六大模块 + 端到端）
+  models.py        Data models (BusinessLine / FactCard / QAPair / Term / KnowledgeGraph / ProbeResult / MetricsSnapshot)
+  registry.py      Component registry (pluggability core)
+  config.py        Config system (multi-line + path layout)
+  store.py         SQLite store (resume + audit)
+  llm.py           LLM Provider abstraction (heuristic / openai_compat)
+  logutil.py       Logging
+  ingest.py        Content ingest (reader plugins: markdown_dir / file / text / csv / jsonl / url / api)
+  chunker.py       Semantic chunking
+  structure.py     Structured organization (entity / fact / qa / term / graph / quality score)
+  semantic.py      Semantic enhancement (citable / authority / answer-first / intent coverage)
+  formats/         Standardized output (llms.txt / JSON-LD / cards / site / sitemap)
+  distribute.py    Automated distribution (publisher plugins + incremental + scheduler)
+  monitor.py       Monitoring (probe plugins + metrics + reports)
+  pipeline.py      End-to-end orchestration (7 stages)
+  cli.py           CLI entry
+tests/test_smoke.py  Smoke tests (10 cases, covering the six modules + end-to-end)
 ```
+
+---
+
+## Documentation
+
+- 🇨🇳 Chinese README: [README.zh-CN.md](README.zh-CN.md)
+- 🇨🇳 Detailed Chinese usage guide: [docs/GEO使用说明.md](docs/GEO使用说明.md) — covers initialization, config params, submitting tasks, calling the generation interface, parsing outputs, limits, best practices, and troubleshooting.
+
+---
+
+## Extending
+
+All core components are registered in `registry.py`. To add a new reader, publisher, extractor, or probe, subclass the base and register it:
+
+```python
+from geo_engine.registry import REGISTRY
+from geo_engine.distribute import BasePublisher
+
+@REGISTRY.register("publisher", "my_target")
+class MyPublisher(BasePublisher):
+    def publish(self, artifacts):
+        ...  # your distribution logic
+```
+
+Then reference `"type": "my_target"` in a business line's `targets`.
+
+---
+
+## Contributing
+
+Contributions are welcome. Please open an issue to discuss substantial changes first. Keep it dependency-free (standard library only) unless a new capability genuinely requires a third-party package.
+
+## License
+
+See [LICENSE](LICENSE) (to be added). The project is currently provided as-is for evaluation and integration.
