@@ -159,6 +159,7 @@ tests/test_smoke.py  Smoke tests (10 cases, covering the six modules + end-to-en
 
 - 🇨🇳 Chinese README: [README.zh-CN.md](README.zh-CN.md)
 - 🇨🇳 Detailed Chinese usage guide: [docs/GEO使用说明.md](docs/GEO使用说明.md) — covers initialization, config params, submitting tasks, calling the generation interface, parsing outputs, limits, best practices, and troubleshooting.
+- 🌐 Detailed English usage guide: [docs/geo-usage-guide.md](docs/geo-usage-guide.md) — full English translation of the above, for contributors and integrators.
 
 ---
 
