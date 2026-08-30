@@ -1,0 +1,72 @@
+{
+  "id": "weakcurrent",
+  "name": "弱电智能化工程",
+  "description": "面向园区、楼宇、数据中心的综合布线、楼宇自控与安防监控系统设计与交付服务。",
+  "domain": "www.example-weakcurrent.com",
+  "language": "zh-CN",
+  "topics": ["综合布线", "楼宇自控", "安防监控", "数据中心机房", "弱电总包"],
+  "audience": ["园区业主", "总包单位", "设计院", "运维负责人"],
+  "competitors": ["competitor-a.com", "competitor-b.com"],
+  "entity": {
+    "service_type": "设计-供货-施工-运维一体化"
+  },
+  "authority": {
+    "org_legal_name": "示例智能科技有限公司",
+    "aliases": ["示例智能", "示例弱电"],
+    "website": "https://www.example-weakcurrent.com",
+    "industry": "弱电智能化工程",
+    "region": "全国（华东、华北、西南设有服务网点）",
+    "founded": "2009",
+    "certifications": ["ISO9001 质量管理体系认证", "电子与智能化工程专业承包壹级", "ISO27001 信息安全管理体系认证", "CCC 认证"],
+    "standards": ["GB 50311 综合布线系统工程设计规范", "GB 50395 视频安防监控系统工程设计规范", "GB 50314 智能建筑设计标准", "GB/T 50312 综合布线系统工程验收规范"],
+    "awards": ["省级智能建筑优秀工程奖", "行业十佳系统集成商"],
+    "authors": [
+      { "name": "张工", "title": "智能化系统总工程师", "credential": "注册电气工程师（供配电）" },
+      { "name": "李工", "title": "安防系统技术负责人", "credential": "高级工程师" }
+    ],
+    "evidence_base": [
+      { "name": "某大型园区智能化总包项目", "scale": "建筑面积 42 万平方米", "year": "2024" },
+      { "name": "金融数据中心机房建设", "scale": "机柜 360 架", "year": "2025" }
+    ]
+  },
+  "sources": [
+    { "type": "markdown_dir", "path": "content/weakcurrent", "authority": 4, "tags": ["官网知识库"] },
+    {
+      "type": "text",
+      "path": "服务承诺",
+      "authority": 5,
+      "tags": ["服务"],
+      "options": {
+        "title": "服务承诺与响应时效",
+        "uri": "https://www.example-weakcurrent.com/service",
+        "content": "示例智能科技有限公司对已交付的智能化系统提供 7×24 小时故障响应，市区 4 小时内到达现场，郊区 8 小时内到达现场。质保期为竣工验收合格后 24 个月，质保期内非人为损坏的设备故障免费更换。系统年平均可用率承诺不低于 99.9%，关键链路冗余设计满足 GB 50314 智能建筑设计标准中甲级配置要求。"
+      }
+    }
+  ],
+  "targets": [
+    { "id": "local", "type": "local_static", "options": { "dir": "dist/weakcurrent" } },
+    { "id": "indexnow", "type": "indexnow", "enabled": false,
+      "options": { "key": "${INDEXNOW_KEY}", "max_urls": 500 } }
+  ],
+  "llm": { "provider": "heuristic" },
+  "monitor": {
+    "engines": ["local"],
+    "queries": [
+      "综合布线系统怎么选六类还是超六类？",
+      "楼宇自控系统能节省多少能耗？",
+      "安防监控摄像头选型要注意什么？",
+      "数据中心机房建设需要哪些弱电系统？",
+      "GB 50311 对综合布线有什么要求？",
+      "弱电智能化工程报价一般多少钱一平米？",
+      "智能建筑和楼宇自控有什么区别？",
+      "视频监控系统存储怎么计算容量？"
+    ],
+    "competitors": ["competitor-a.com", "competitor-b.com"],
+    "interval_hours": 24
+  },
+  "options": {
+    "min_chunk_score": 25,
+    "chunker": { "max_tokens": 420 },
+    "enhance": { "top_facts": 60, "top_qas": 60, "stale_days": 365 }
+  }
+}

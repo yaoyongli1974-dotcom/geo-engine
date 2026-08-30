@@ -1,0 +1,13 @@
+# ===== 运行时生成的派生产物（非源码，不入库）=====
+dist/
+data/
+reports/
+
+# ===== WorkBuddy 项目数据（含本地记忆，不外发）=====
+.workbuddy/
+
+# ===== Python =====
+__pycache__/
+*.pyc
+*.pyo
+*.db

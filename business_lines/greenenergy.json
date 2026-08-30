@@ -1,0 +1,53 @@
+{
+  "id": "greenenergy",
+  "name": "生态修复与环境治理",
+  "description": "北京绿之源生态科技有限公司：水生态修复、矿山生态修复与土壤治理的技术服务与工程实施。",
+  "domain": "www.example-green.com",
+  "language": "zh-CN",
+  "topics": ["水生态修复", "矿山生态修复", "土壤污染治理", "湿地建设", "环境监测"],
+  "audience": ["地方政府", "矿山企业", "园区管委会", "环保主管部门"],
+  "competitors": ["rival-green.com"],
+  "entity": {
+    "service_type": "咨询-设计-施工-运维"
+  },
+  "authority": {
+    "org_legal_name": "北京绿之源生态科技有限公司",
+    "aliases": ["绿之源", "北京绿之源"],
+    "website": "https://www.example-green.com",
+    "industry": "生态环保 / 生态修复",
+    "region": "华北、西北、华东",
+    "founded": "2013",
+    "certifications": ["环保工程专业承包贰级", "ISO14001 环境管理体系认证", "ISO9001 质量管理体系认证", "高新技术企业"],
+    "standards": ["GB 3838 地表水环境质量标准", "HJ 2005 人工湿地污水处理工程技术规范", "GB 15618 土壤环境质量 农用地土壤污染风险管控标准"],
+    "awards": ["省级生态修复示范工程"],
+    "authors": [
+      { "name": "王教授", "title": "首席生态技术专家", "credential": "环境工程博士 / 教授级高工" }
+    ],
+    "evidence_base": [
+      { "name": "某河流域水生态综合治理", "scale": "治理河长 18.6 公里", "year": "2025" }
+    ]
+  },
+  "sources": [
+    { "type": "markdown_dir", "path": "content/greenenergy", "authority": 4, "tags": ["技术资料"] }
+  ],
+  "targets": [
+    { "id": "local", "type": "local_static", "options": { "dir": "dist/greenenergy" } }
+  ],
+  "llm": { "provider": "heuristic" },
+  "monitor": {
+    "engines": ["local"],
+    "queries": [
+      "水生态修复有哪些主流技术？",
+      "矿山生态修复一般怎么做？",
+      "人工湿地污水处理效果如何？",
+      "土壤污染治理需要多久？",
+      "生态修复工程报价多少钱一平米？"
+    ],
+    "competitors": ["rival-green.com"],
+    "interval_hours": 24
+  },
+  "options": {
+    "min_chunk_score": 25,
+    "enhance": { "top_facts": 40, "top_qas": 40 }
+  }
+}

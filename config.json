@@ -1,0 +1,22 @@
+{
+  "log_level": "INFO",
+  "layout": {
+    "business_lines": "business_lines",
+    "content": "content",
+    "dist": "dist",
+    "data": "data",
+    "reports": "reports"
+  },
+  "llm": {
+    "provider": "heuristic",
+    "model": "gpt-4o-mini",
+    "base_url": "https://api.openai.com/v1",
+    "api_key_env": "OPENAI_API_KEY",
+    "temperature": 0.2,
+    "max_tokens": 1200,
+    "timeout": 60
+  },
+  "monitor": {
+    "interval_hours": 24
+  }
+}
