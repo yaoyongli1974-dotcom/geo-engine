@@ -1,0 +1,9 @@
+data/
+dist/
+reports/
+.workbuddy/
+.git/
+*.db
+__pycache__/
+*.pyc
+.env

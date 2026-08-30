@@ -161,6 +161,24 @@ tests/test_smoke.py  Smoke tests (10 cases, covering the six modules + end-to-en
 - 🇨🇳 Detailed Chinese usage guide: [docs/GEO使用说明.md](docs/GEO使用说明.md) — covers initialization, config params, submitting tasks, calling the generation interface, parsing outputs, limits, best practices, and troubleshooting.
 - 🌐 Detailed English usage guide: [docs/geo-usage-guide.md](docs/geo-usage-guide.md) — full English translation of the above, for contributors and integrators.
 
+## Multi-user / Server deployment
+
+The engine also runs as a **multi-tenant server** (`geo_web` package) — without touching the
+core `geo_engine` algorithms:
+
+- **Tenant isolation**: each tenant gets its own SQLite database (`tenants/<tid>/geo.db`) + WAL; artifacts are namespaced under `tenants/<tid>/dist/<bl>/`.
+- **Auth**: JWT (HS256, stdlib) + PBKDF2 password hashing; pluggable **OAuth / WeCom (企业微信)** login.
+- **Background jobs**: long `GeoPipeline.run()` is async (thread pool), polled by `job_id`.
+- **REST API**: register/login/OAuth, business lines, content upload, run, artifacts, reports, health.
+
+```bash
+pip install -r requirements.txt
+export GEO_DATA_DIR=/var/lib/geo/data GEO_JWT_SECRET="$(python -c 'import secrets;print(secrets.token_urlsafe(48))')"
+python -m geo_web.server        # http://0.0.0.0:8000
+```
+
+→ Full reference: [docs/geo-web-api.md](docs/geo-web-api.md) · Architecture & plan: [docs/architecture-multiuser.md](docs/architecture-multiuser.md)
+
 ---
 
 ## Extending

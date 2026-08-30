@@ -13,6 +13,8 @@ import threading
 from contextlib import contextmanager
 from typing import Any, Dict, Iterable, List, Optional
 
+from .models import utcnow
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
     id TEXT PRIMARY KEY,
@@ -104,19 +106,66 @@ CREATE TABLE IF NOT EXISTS runs (
     started_at TEXT,
     finished_at TEXT
 );
+
+-- ---- 多用户化（P1 起）：作业 / 用户 / 刷新令牌。核心引擎不依赖这些表。
+CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY,
+    business_line TEXT NOT NULL,
+    stages TEXT,
+    status TEXT,                       -- queued | running | succeeded | failed
+    progress TEXT,
+    result TEXT,                       -- PipelineResult.to_dict() 的 JSON
+    error TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_bl ON jobs(business_line);
+
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    email TEXT,
+    name TEXT,
+    password_hash TEXT,
+    role TEXT DEFAULT 'owner',         -- owner | admin | member | viewer
+    provider TEXT DEFAULT 'local',     -- local | wecom | dev | <oauth name>
+    external_id TEXT,
+    created_at TEXT,
+    UNIQUE(tenant_id, email)
+);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    token_hash TEXT NOT NULL,
+    expires_at TEXT,
+    revoked INTEGER DEFAULT 0,
+    created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_rt_user ON refresh_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_rt_tenant ON refresh_tokens(tenant_id);
 """
 
 
 class Store:
     """线程安全的 SQLite 封装。"""
 
-    def __init__(self, db_path: str) -> None:
+    def __init__(self, db_path: str, wal: bool = True) -> None:
         os.makedirs(os.path.dirname(os.path.abspath(db_path)) or ".", exist_ok=True)
         self.db_path = db_path
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         with self._lock:
+            # WAL：多进程/多 worker 下允许并发读 + 单写者，显著降低 database is locked
+            if wal:
+                try:
+                    self._conn.execute("PRAGMA journal_mode=WAL")
+                    self._conn.execute("PRAGMA synchronous=NORMAL")
+                except sqlite3.OperationalError:  # pragma: no cover - 网络文件系统不支持 WAL
+                    pass
             self._conn.executescript(SCHEMA)
             self._conn.commit()
 
@@ -310,6 +359,89 @@ class Store:
                 (business_line, limit),
             )
             return [dict(r) for r in cur.fetchall()]
+
+    # ---------------------------------------------------------------- 作业（后台任务）
+    def create_job(self, job_id: str, business_line: str, stages: str,
+                   created_at: str) -> None:
+        with self.tx() as conn:
+            conn.execute(
+                "INSERT INTO jobs (id, business_line, stages, status, created_at, updated_at)"
+                " VALUES (?,?,?,'queued',?,?)",
+                (job_id, business_line, stages, created_at, created_at),
+            )
+
+    def update_job(self, job_id: str, status: str,
+                   progress: Optional[str] = None,
+                   result: Optional[Dict[str, Any]] = None,
+                   error: Optional[str] = None) -> None:
+        now = utcnow()
+        with self.tx() as conn:
+            conn.execute(
+                "UPDATE jobs SET status=?, progress=?, result=?, error=?, updated_at=? WHERE id=?",
+                (status, progress,
+                 json.dumps(result, ensure_ascii=False) if result is not None else None,
+                 error, now, job_id),
+            )
+
+    def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            cur = self._conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            d = dict(row)
+            if d.get("result"):
+                d["result"] = json.loads(d["result"])
+            return d
+
+    # ---------------------------------------------------------------- 用户 / 鉴权
+    def upsert_user(self, user: Dict[str, Any]) -> None:
+        cols = ["id", "tenant_id", "email", "name", "password_hash",
+                "role", "provider", "external_id", "created_at"]
+        row = {c: user.get(c) for c in cols}
+        placeholders = ", ".join("?" for _ in cols)
+        updates = ", ".join(f"{c}=excluded.{c}" for c in cols if c != "id")
+        with self.tx() as conn:
+            conn.execute(
+                f"INSERT INTO users ({', '.join(cols)}) VALUES ({placeholders}) "
+                f"ON CONFLICT(id) DO UPDATE SET {updates}",
+                [row[c] for c in cols],
+            )
+
+    def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            cur = self._conn.execute("SELECT * FROM users WHERE id=?", (user_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            cur = self._conn.execute("SELECT * FROM users WHERE email=?", (email,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def add_refresh_token(self, token_id: str, user_id: str, tenant_id: str,
+                          token_hash: str, expires_at: str) -> None:
+        with self.tx() as conn:
+            conn.execute(
+                "INSERT INTO refresh_tokens (id, user_id, tenant_id, token_hash, expires_at, created_at)"
+                " VALUES (?,?,?,?,?,?)",
+                (token_id, user_id, tenant_id, token_hash, expires_at, utcnow()),
+            )
+
+    def get_refresh_token(self, token_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            cur = self._conn.execute("SELECT * FROM refresh_tokens WHERE id=?", (token_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def revoke_refresh_token(self, token_id: str) -> None:
+        with self.tx() as conn:
+            conn.execute("UPDATE refresh_tokens SET revoked=1 WHERE id=?", (token_id,))
+
+    def revoke_user_refresh_tokens(self, user_id: str) -> None:
+        with self.tx() as conn:
+            conn.execute("UPDATE refresh_tokens SET revoked=1 WHERE user_id=?", (user_id,))
 
 
 def _cs(text: str) -> str:

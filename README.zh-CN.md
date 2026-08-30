@@ -146,3 +146,22 @@ geo_engine/
   cli.py           命令行入口
 tests/test_smoke.py 冒烟测试（10 项，覆盖六大模块 + 端到端）
 ```
+
+---
+
+## 多用户 / 服务器端部署
+
+引擎还提供**多租户服务端**（`geo_web` 包），且**不改动核心引擎 `geo_engine` 算法**：
+
+- **租户隔离**：每租户独立 SQLite 库（`tenants/<tid>/geo.db`）+ WAL；产物按 `tenants/<tid>/dist/<bl>/` 命名空间隔离。
+- **鉴权**：JWT（HS256，标准库实现）+ PBKDF2 口令哈希；可插拔 **OAuth / 企业微信** 登录。
+- **后台作业**：长耗时 `GeoPipeline.run()` 异步化（线程池），以 `job_id` 轮询。
+- **REST 接口**：注册/登录/OAuth、业务线、内容上传、运行、产物、报表、健康检查。
+
+```bash
+pip install -r requirements.txt
+export GEO_DATA_DIR=/var/lib/geo/data GEO_JWT_SECRET="$(python -c 'import secrets;print(secrets.token_urlsafe(48))')"
+python -m geo_web.server        # http://0.0.0.0:8000
+```
+
+→ 完整接口文档：[docs/geo-web-api.md](docs/geo-web-api.md) · 架构与实施计划：[docs/architecture-multiuser.md](docs/architecture-multiuser.md)

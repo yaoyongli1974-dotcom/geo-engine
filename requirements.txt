@@ -1,0 +1,6 @@
+# GEO Web 层依赖（核心引擎 geo_engine 仍保持零依赖）
+# 安装：pip install -r requirements.txt
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.5
+python-multipart>=0.0.9   # 表单/文件上传（如后续需要）
