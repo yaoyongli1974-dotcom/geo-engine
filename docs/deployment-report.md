@@ -456,4 +456,58 @@ curl -I -L -k --max-redirs 10 "https://geo.xb168.com/docs"
 
 ---
 
+## 15. 可视化发布平台（Web UI）
+
+上线后，GEO 引擎从「纯 API 服务」升级为「带可视化操作界面的在线发布平台」，非技术用户可经浏览器完成业务线配置、内容撰写、一键生成发布与公开链接管理。
+
+### 15.1 访问地址
+- 平台首页（SPA）：`https://geo.xb168.com/` 或 `https://geo.xb168.com/app`
+- 交互式 API 文档：`https://geo.xb168.com/docs`
+
+### 15.2 功能清单
+| 模块 | 能力 |
+| --- | --- |
+| 账号 | 注册 / 登录（JWT），每账号自动创建独立租户空间，数据隔离 |
+| 业务线 | 列表 / 新建 / 编辑 / 删除；配置语言、主题、目标受众 |
+| 内容 | Markdown 在线编辑器；列表 / 新建 / 编辑 / 删除 |
+| 生成发布 | 一键运行 GEO 流水线，生成 llms.txt / JSON-LD / 站点 / sitemap / cards 等产物，自动发布到公开目录 |
+| 发布管理 | 公开 URL 列表与一键复制、发布历史、作业进度实时轮询 |
+
+### 15.3 公开 URL 格式（GEO 核心价值）
+发布成功后，以下地址**无需登录**即可访问，可直接被 ChatGPT / Perplexity / Bing 等生成式引擎抓取引用：
+- `https://geo.xb168.com/p/{业务线}/llms.txt` — 面向 LLM 的站点索引
+- `https://geo.xb168.com/p/{业务线}/llms-full.txt` — 完整正文
+- `https://geo.xb168.com/p/{业务线}/index.html` — 生成式站点首页
+- `https://geo.xb168.com/p/{业务线}/sitemap.xml` — 站点地图
+- `https://geo.xb168.com/p/{业务线}/data/*.jsonld` — 结构化数据（JSON-LD）
+
+### 15.4 架构
+- FastAPI 同时托管四类路由：`/api/*`（业务，需鉴权）、`/p/*`（公开产物，无鉴权）、`/` 与 `/app`（SPA 首页）、`/static`（静态资源）。
+- OpenResty 443 改为**全量反代**到 `127.0.0.1:8000`（catch-all），仅保留 `/.well-known/acme-challenge`；所有路由分发交给 FastAPI。
+- 发布实现：`POST /api/business-lines/{bl}/publish` 触发异步作业；作业成功后 `jobs._publish_artifacts` 把 `dist/` 产物复制到 `DATA_DIR/published/{bl}/`，公开路由 `GET /p/{bl}/{path}` 直接 serve。
+
+### 15.5 代码位置
+- 前端：`geo_web/static/index.html`（零 CDN 依赖单文件 SPA，内联 CSS/JS）
+- 后端新增：`geo_web/app.py`（内容CRUD、业务线更新/删除、发布、公开路由、静态托管）、`geo_web/jobs.py`（发布复制逻辑）、`geo_engine/store.py`（publishes 表）、`geo_web/schemas.py`（请求/响应模型）
+
+### 15.6 更新部署
+> 重要：本服务器 `/opt/geo-engine` **不是 git 仓库**（首版经 scp 上传），因此更新需手动上传文件后重启，或先 `git init` 化为 git 仓库。
+
+```bash
+# 本地改动后，经 scp 上传（示例如下），再重启
+scp geo_web/app.py geo_web/jobs.py geo_web/schemas.py geo_web/__init__.py \
+    ubuntu@152.32.135.156:/opt/geo-engine/geo_web/
+scp geo_web/static/index.html ubuntu@152.32.135.156:/opt/geo-engine/geo_web/static/
+scp geo_engine/store.py ubuntu@152.32.135.156:/opt/geo-engine/geo_engine/
+ssh ubuntu@152.32.135.156 "sudo systemctl restart geo-engine"
+```
+
+### 15.7 注意事项
+- **LLM 语义增强**：需配置 `GEO_LLM_*` 环境变量才有语义增强；未配置时 `use_llm=false` 仍可生成结构化产物（已端到端验证：生成 17 个产物并发布成功）。
+- **公开产物不鉴权**：`/p/*` 对所有访问者开放，请勿发布涉密业务线内容。
+- **Token 时效**：前端 JWT 默认 15 分钟过期，过期自动跳转登录页。
+- **多用户隔离**：每个注册账号独立租户，业务线 / 内容 / 产物按租户目录隔离（`DATA_DIR/tenants/<tid>/`）。
+
+---
+
 **部署完成。**
