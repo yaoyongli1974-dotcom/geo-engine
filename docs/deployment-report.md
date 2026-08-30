@@ -196,7 +196,9 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     add_header Strict-Transport-Security "max-age=31536000" always;
     location /api/ { proxy_pass http://127.0.0.1:8000/api/; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme; }
-    location /docs/ { proxy_pass http://127.0.0.1:8000/docs/; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme; }
+    # /docs/ 映射到后端 /docs：FastAPI 已关闭 redirect_slashes，Nginx 又会把 /docs 301 到 /docs/，
+    # 若 proxy_pass 带尾斜杠则后端收到 /docs/ 会 404，故去掉尾斜杠。
+    location /docs/ { proxy_pass http://127.0.0.1:8000/docs; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme; }
     location /openapi.json { proxy_pass http://127.0.0.1:8000/openapi.json; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme; }
     location / { return 200 'GEO Engine is running\n'; add_header Content-Type text/plain; }
 }
@@ -412,6 +414,45 @@ curl -s https://geo.xb168.com/api/health
 # 证书信息
 sudo openssl x509 -in /opt/1panel/apps/openresty/openresty/conf/ssl/geo_xb168_com/fullchain.pem -noout -dates -subject
 ```
+
+### 14.6 `/docs` 重定向循环修复
+
+**现象**：浏览器访问 `https://geo.xb168.com/docs` 出现 `ERR_TOO_MANY_REDIRECTS`（该网页无法正常运作，将您重定向的次数过多）。
+
+**原因**：
+
+1. Nginx 默认会把不带斜杠的 `/docs` 301 补全到 `/docs/`。
+2. FastAPI 默认又会把 `/docs/` 307 重定向回 `/docs`（`redirect_slashes=True`）。
+3. 两者叠加形成 `/docs` → `/docs/` → `/docs` 无限循环。
+
+**修复**：
+
+1. **后端**：在 `geo_web/app.py` 创建 FastAPI 应用时关闭斜杠重定向：
+
+```python
+app = FastAPI(title="GEO Web API", version="1.0.0", redirect_slashes=False)
+```
+
+2. **反向代理**：Nginx 的 `/docs/` location 中 `proxy_pass` 去掉尾斜杠，使 Nginx 补全后的 `/docs/` 请求映射到后端的 `/docs`：
+
+```nginx
+location /docs/ {
+    proxy_pass http://127.0.0.1:8000/docs;  # 注意无尾斜杠
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+**验证**：
+
+```bash
+curl -I -L -k --max-redirs 10 "https://geo.xb168.com/docs"
+# 预期：HTTP/1.1 301 -> /docs/，然后 HTTP/1.1 200 OK，无循环。
+```
+
+完整配置文件已纳入版本控制：`deploy/nginx/geo-xb168.com.conf`。
 
 ---
 
