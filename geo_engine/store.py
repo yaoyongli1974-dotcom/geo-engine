@@ -146,6 +146,16 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_rt_user ON refresh_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_rt_tenant ON refresh_tokens(tenant_id);
+
+-- ---- 发布历史（记录每次「生成并发布」的产物公开 URL 与时间）
+CREATE TABLE IF NOT EXISTS publishes (
+    id TEXT PRIMARY KEY,
+    business_line TEXT NOT NULL,
+    urls TEXT,
+    job_id TEXT,
+    published_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_publishes_bl ON publishes(business_line);
 """
 
 
@@ -442,6 +452,31 @@ class Store:
     def revoke_user_refresh_tokens(self, user_id: str) -> None:
         with self.tx() as conn:
             conn.execute("UPDATE refresh_tokens SET revoked=1 WHERE user_id=?", (user_id,))
+
+    # ---------------------------------------------------------------- 发布历史
+    def add_publish(self, publish_id: str, business_line: str, urls: List[str],
+                    job_id: str, published_at: str) -> None:
+        with self.tx() as conn:
+            conn.execute(
+                "INSERT INTO publishes (id, business_line, urls, job_id, published_at)"
+                " VALUES (?,?,?,?,?)",
+                (publish_id, business_line, json.dumps(urls, ensure_ascii=False),
+                 job_id, published_at),
+            )
+
+    def get_publishes(self, business_line: str, limit: int = 20) -> List[Dict[str, Any]]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM publishes WHERE business_line=? ORDER BY published_at DESC LIMIT ?",
+                (business_line, limit),
+            )
+            out = []
+            for r in cur.fetchall():
+                d = dict(r)
+                if d.get("urls"):
+                    d["urls"] = json.loads(d["urls"])
+                out.append(d)
+            return out
 
 
 def _cs(text: str) -> str:

@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GEO 可视化发布平台</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#171d26; --panel2:#1f2733; --line:#2a3340;
+    --txt:#e6edf3; --muted:#8b98a9; --brand:#2ecc71; --brand2:#27ae60;
+    --danger:#e74c3c; --warn:#f39c12; --info:#3498db; --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:var(--bg);color:var(--txt);font-size:14px;line-height:1.6}
+  a{color:var(--brand);text-decoration:none}
+  button{font-family:inherit;cursor:pointer;border:none;border-radius:8px;padding:9px 16px;font-size:14px;font-weight:600;transition:.15s}
+  .btn-primary{background:var(--brand);color:#06210f}
+  .btn-primary:hover{background:var(--brand2)}
+  .btn-ghost{background:transparent;color:var(--txt);border:1px solid var(--line)}
+  .btn-ghost:hover{border-color:var(--brand)}
+  .btn-danger{background:transparent;color:var(--danger);border:1px solid var(--danger)}
+  .btn-danger:hover{background:rgba(231,76,60,.12)}
+  .btn-sm{padding:5px 10px;font-size:12px}
+  input,textarea,select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    border-radius:8px;padding:9px 12px;font-family:inherit;font-size:14px;margin:4px 0 12px}
+  textarea{min-height:160px;resize:vertical;font-family:"SFMono-Regular",Consolas,monospace;font-size:13px}
+  label{display:block;color:var(--muted);font-size:12px;margin-top:6px}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px}
+  header{position:sticky;top:0;background:rgba(15,20,25,.92);backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line);z-index:10}
+  .hbar{max-width:1080px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;justify-content:space-between}
+  .logo{font-weight:800;font-size:17px;display:flex;align-items:center;gap:10px}
+  .logo .dot{width:10px;height:10px;border-radius:50%;background:var(--brand);box-shadow:0 0 12px var(--brand)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px;margin:14px 0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+  .bl-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;cursor:pointer;transition:.15s}
+  .bl-card:hover{border-color:var(--brand);transform:translateY(-2px)}
+  .bl-card h3{margin:0 0 6px}
+  .muted{color:var(--muted)}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .spacer{flex:1}
+  .badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;border:1px solid var(--line)}
+  .b-ok{color:var(--brand);border-color:var(--brand)}
+  .b-run{color:var(--warn);border-color:var(--warn)}
+  .b-fail{color:var(--danger);border-color:var(--danger)}
+  .b-idle{color:var(--muted)}
+  .tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);margin:10px 0 18px;flex-wrap:wrap}
+  .tab{padding:9px 14px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+  .tab.active{color:var(--txt);border-bottom-color:var(--brand)}
+  table{width:100%;border-collapse:collapse}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-size:12px;font-weight:600}
+  tr:hover td{background:var(--panel2)}
+  .center{max-width:380px;margin:8vh auto}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--panel2);
+    border:1px solid var(--brand);padding:12px 20px;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.4);z-index:50}
+  .toast.err{border-color:var(--danger)}
+  .hidden{display:none}
+  .urlbox{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;
+    font-family:monospace;font-size:12px;word-break:break-all;display:flex;gap:8px;align-items:center;margin:6px 0}
+  .urlbox a{color:var(--info)}
+  pre{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;font-size:12px}
+  .pill{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:2px 7px;margin:2px}
+  .hero{text-align:center;padding:40px 0}
+  .hero h1{font-size:26px;margin:0 0 8px}
+  .hero p{color:var(--muted);max-width:560px;margin:0 auto 18px}
+  .progress{height:6px;background:var(--panel2);border-radius:6px;overflow:hidden}
+  .progress>span{display:block;height:100%;background:var(--brand);width:0;transition:.3s}
+</style>
+</head>
+<body>
+<header id="topbar" class="hidden">
+  <div class="hbar">
+    <div class="logo"><span class="dot"></span> GEO 发布平台</div>
+    <div class="row">
+      <span class="muted" id="who"></span>
+      <button class="btn-ghost btn-sm" onclick="go('#/')">业务线</button>
+      <button class="btn-ghost btn-sm" onclick="api.logout()">退出</button>
+    </div>
+  </div>
+</header>
+
+<div id="app"></div>
+
+<script>
+// ---------------- 基础工具 ----------------
+const $ = (s,r=document)=>r.querySelector(s);
+const el = (id)=>document.getElementById(id);
+function h(html){return html;}
+function toast(msg,err){const t=document.createElement('div');t.className='toast'+(err?' err':'');t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),3200);}
+function go(hash){location.hash=hash;}
+
+// ---------------- API 客户端 ----------------
+const api = {
+  token: localStorage.getItem('geo_token')||'',
+  setToken(t){this.token=t;localStorage.setItem('geo_token',t);},
+  logout(){this.token='';localStorage.removeItem('geo_token');localStorage.removeItem('geo_user');location.hash='#/login';render();},
+  async req(method,path,body){
+    const opt={method,headers:{}};
+    if(this.token)opt.headers['Authorization']='Bearer '+this.token;
+    if(body!==undefined){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(body);}
+    const r=await fetch(path,opt);
+    if(r.status===401){this.logout();throw new Error('登录已过期，请重新登录');}
+    let data=null;try{data=await r.json();}catch(e){}
+    if(!r.ok)throw new Error((data&&data.detail)||('请求失败 '+r.status));
+    return data;
+  },
+  get(p){return this.req('GET',p);},
+  post(p,b){return this.req('POST',p,b);},
+  put(p,b){return this.req('PUT',p,b);},
+  del(p,b){return this.req('DELETE',p,b);},
+};
+
+// ---------------- 视图：登录 / 注册 ----------------
+function viewAuth(){
+  el('topbar').classList.add('hidden');
+  el('app').innerHTML=`
+  <div class="wrap"><div class="center card">
+    <div class="logo" style="justify-content:center;margin-bottom:14px"><span class="dot"></span> GEO 发布平台</div>
+    <div class="tabs" style="justify-content:center">
+      <div class="tab ${authMode==='login'?'active':''}" onclick="authMode='login';viewAuth()">登录</div>
+      <div class="tab ${authMode==='register'?'active':''}" onclick="authMode='register';viewAuth()">注册</div>
+    </div>
+    ${authMode==='register'?`
+      <label>组织 / 公司名称</label><input id="org" placeholder="例如：绿之源生态科技"/>
+      <label>显示名</label><input id="name" placeholder="你的称呼"/>`:''}
+    <label>邮箱（登录名）</label><input id="email" placeholder="you@company.com"/>
+    <label>密码（≥8 位）</label><input id="pw" type="password" placeholder="••••••••"/>
+    <button class="btn-primary" style="width:100%;margin-top:8px" onclick="doAuth()">${authMode==='login'?'登录':'创建账号'}</button>
+    <p class="muted" style="text-align:center;margin-top:14px;font-size:12px">注册即自动创建独立租户空间，数据完全隔离</p>
+  </div></div>`;
+}
+async function doAuth(){
+  try{
+    const email=el('email').value.trim(), pw=el('pw').value;
+    if(!email||!pw)return toast('请填写邮箱与密码',true);
+    let data;
+    if(authMode==='login'){
+      data=await api.post('/api/auth/login',{email,password:pw});
+    }else{
+      const org=el('org').value.trim()||email.split('@')[0], name=el('name').value.trim();
+      data=await api.post('/api/auth/register',{org_name:org,email,password:pw,name});
+    }
+    api.setToken(data.access_token);
+    localStorage.setItem('geo_user',email);
+    location.hash='#/';render();toast('欢迎使用 GEO 发布平台');
+  }catch(e){toast(e.message,true);}
+}
+
+// ---------------- 视图：业务线列表 ----------------
+async function viewHome(){
+  el('topbar').classList.remove('hidden');
+  el('who').textContent=localStorage.getItem('geo_user')||'';
+  el('app').innerHTML=`<div class="wrap"><div class="hero">
+    <h1>生成式引擎优化 · 在线发布</h1>
+    <p>创建业务线 → 撰写企业内容 → 一键生成 llms.txt / JSON-LD 等标准产物 → 获得公开可抓取的 GEO 链接，让 ChatGPT、Perplexity 等 AI 引擎更好地理解并引用你的品牌。</p>
+    <button class="btn-primary" onclick="showNewBL()">+ 新建业务线</button>
+  </div><div id="blist" class="grid"></div></div>`;
+  try{
+    const list=await api.get('/api/business-lines');
+    const box=el('blist');
+    if(!list.length){box.innerHTML='<p class="muted">还没有业务线，点击上方按钮创建第一个。</p>';return;}
+    box.innerHTML=list.map(b=>`
+      <div class="bl-card" onclick="go('#/bl/${b.id}')">
+        <div class="row"><h3>${esc(b.name)}</h3><span class="spacer"></span>
+          <span class="badge ${b.has_content?'b-ok':'b-idle'}">${b.has_content?'有内容':'空'}</span></div>
+        <p class="muted" style="margin:6px 0">${esc(b.description||'—')}</p>
+        <div class="row"><span class="pill">ID: ${esc(b.id)}</span><span class="pill">来源 ${b.sources}</span></div>
+      </div>`).join('');
+  }catch(e){toast(e.message,true);}
+}
+function showNewBL(){
+  el('app').insertAdjacentHTML('beforeend',`<div class="wrap card" id="newbl">
+    <h3>新建业务线</h3>
+    <label>业务线 ID（英文 slug，创建后不可改）</label><input id="nb_id" placeholder="weak-electric"/>
+    <label>名称</label><input id="nb_name" placeholder="弱电智能化"/>
+    <label>简介</label><input id="nb_desc" placeholder="面向智能建筑的专业内容"/>
+    <label>域名（可选）</label><input id="nb_domain" placeholder="https://www.example.com"/>
+    <div class="row"><button class="btn-primary" onclick="createBL()">创建</button>
+      <button class="btn-ghost" onclick="el('newbl').remove()">取消</button></div>
+  </div>`);
+  el('nb_id').focus();
+}
+async function createBL(){
+  try{
+    const body={id:el('nb_id').value.trim(),name:el('nb_name').value.trim()||el('nb_id').value.trim(),
+      description:el('nb_desc').value.trim(),domain:el('nb_domain').value.trim()};
+    if(!body.id)return toast('请填写业务线 ID',true);
+    await api.post('/api/business-lines',body);
+    el('newbl')&&el('newbl').remove();
+    toast('业务线已创建');viewHome();
+  }catch(e){toast(e.message,true);}
+}
+
+// ---------------- 视图：业务线详情 ----------------
+let curBL=null;
+async function viewBL(id){
+  el('topbar').classList.remove('hidden');
+  el('who').textContent=localStorage.getItem('geo_user')||'';
+  curBL=id;
+  el('app').innerHTML=`<div class="wrap">
+    <div class="row"><button class="btn-ghost btn-sm" onclick="go('#/')">← 返回</button>
+      <h2 style="margin:0" id="bltitle">业务线</h2><span class="spacer"></span>
+      <button class="btn-danger btn-sm" onclick="delBL('${id}')">删除</button></div>
+    <div class="tabs">
+      <div class="tab ${tab==='overview'?'active':''}" onclick="tab='overview';viewBL('${id}')">概览</div>
+      <div class="tab ${tab==='content'?'active':''}" onclick="tab='content';viewBL('${id}')">内容</div>
+      <div class="tab ${tab==='publish'?'active':''}" onclick="tab='publish';viewBL('${id}')">生成发布</div>
+      <div class="tab ${tab==='settings'?'active':''}" onclick="tab='settings';viewBL('${id}')">设置</div>
+    </div>
+    <div id="blbody"></div></div>`;
+  try{
+    const bl=await api.get('/api/business-lines/'+id);
+    el('bltitle').textContent=bl.name||id;
+    if(tab==='overview')viewBLOverview(bl);
+    else if(tab==='content')viewBLContent(id);
+    else if(tab==='publish')viewBLPublish(id);
+    else if(tab==='settings')viewBLSettings(id,bl);
+  }catch(e){toast(e.message,true);}
+}
+function viewBLOverview(bl){
+  el('blbody').innerHTML=`
+  <div class="card">
+    <div class="row"><h3 style="margin:0">${esc(bl.name)}</h3><span class="spacer"></span>
+      <span class="badge ${bl.has_content?'b-ok':'b-idle'}">${bl.has_content?'已配置内容':'待添加内容'}</span></div>
+    <p class="muted">${esc(bl.description||'暂无简介')}</p>
+    <div class="row"><span class="pill">ID: ${esc(bl.id)}</span><span class="pill">域名: ${esc(bl.domain||'—')}</span>
+      <span class="pill">内容来源: ${bl.sources}</span></div>
+    <hr style="border-color:var(--line)"/>
+    <p class="muted">GEO（生成式引擎优化）通过把企业专业内容整理为标准产物（llms.txt、JSON-LD、站点地图等），
+    供 AI 搜索引擎抓取与引用。点击「内容」添加素材，再点「生成发布」即可获得公开链接。</p>
+    <div class="row">
+      <button class="btn-primary" onclick="tab='content';viewBL('${bl.id}')">+ 添加内容</button>
+      <button class="btn-ghost" onclick="tab='publish';viewBL('${bl.id}')">生成并发布 →</button>
+    </div>
+  </div>`;
+}
+async function viewBLContent(id){
+  const box=el('blbody');
+  box.innerHTML=`<div class="row"><h3 style="margin:0">内容管理</h3><span class="spacer"></span>
+    <button class="btn-primary btn-sm" onclick="editContent('${id}','')">+ 新建内容</button></div>
+    <div id="clist"><p class="muted">加载中…</p></div>`;
+  try{
+    const list=await api.get('/api/business-lines/'+id+'/contents');
+    const c=el('clist');
+    if(!list.length){c.innerHTML='<p class="muted">还没有内容。点击「新建内容」撰写第一篇企业素材（Markdown 支持）。</p>';return;}
+    c.innerHTML=`<table><thead><tr><th>标题</th><th>权威度</th><th>大小</th><th>更新</th><th></th></tr></thead><tbody>
+      ${list.map(x=>`<tr><td>${esc(x.title||x.name)}</td><td>${'★'.repeat(x.authority)}</td>
+        <td>${x.size}B</td><td class="muted">${x.updated_at}</td>
+        <td class="row"><button class="btn-ghost btn-sm" onclick="editContent('${id}','${x.name}')">编辑</button>
+        <button class="btn-danger btn-sm" onclick="rmContent('${id}','${x.name}')">删</button></td></tr>`).join('')}
+    </tbody></table>`;
+  }catch(e){toast(e.message,true);}
+}
+async function editContent(id,name){
+  let data={title:'',content:'',authority:2,name:''};
+  if(name){
+    try{data=await api.get(`/api/business-lines/${id}/contents/${name}`);}catch(e){toast(e.message,true);return;}
+  }
+  el('blbody').innerHTML=`<h3>${name?'编辑内容':'新建内容'}</h3>
+    <label>文件名 slug（用于存储，建议英文）</label><input id="c_name" value="${esc(data.name)}" ${name?'disabled':''}/>
+    <label>标题</label><input id="c_title" value="${esc(data.title)}"/>
+    <label>权威度（1-5，越高越易被 AI 引用）</label><input id="c_auth" type="number" min="1" max="5" value="${data.authority}"/>
+    <label>正文（Markdown）</label><textarea id="c_body">${esc(data.content)}</textarea>
+    <div class="row"><button class="btn-primary" onclick="saveContent('${id}','${name}')">保存</button>
+      <button class="btn-ghost" onclick="tab='content';viewBL('${id}')">取消</button></div>`;
+  el('c_title').focus();
+}
+async function saveContent(id,name){
+  try{
+    const body={title:el('c_title').value.trim(),content:el('c_body').value,
+      authority:parseInt(el('c_auth').value)||2,name:el('c_name').value.trim()};
+    if(!body.title)return toast('请填写标题',true);
+    if(name){await api.put('/api/business-lines/'+id+'/content',body);}
+    else{await api.post('/api/business-lines/'+id+'/content',body);}
+    toast('内容已保存');tab='content';viewBL(id);
+  }catch(e){toast(e.message,true);}
+}
+async function rmContent(id,name){
+  if(!confirm('确认删除内容「'+name+'」？'))return;
+  try{await api.del('/api/business-lines/'+id+'/content',{name});toast('已删除');viewBLContent(id);}catch(e){toast(e.message,true);}
+}
+
+// ---------------- 视图：生成发布 ----------------
+async function viewBLPublish(id){
+  const box=el('blbody');
+  box.innerHTML=`<div class="card">
+    <h3>生成并发布</h3>
+    <p class="muted">点击下方按钮，系统将运行 GEO 流水线：结构化整理内容 → 语义增强 → 生成 llms.txt / JSON-LD / 站点等标准产物，并发布到公开地址供 AI 引擎抓取。</p>
+    <label><input type="checkbox" id="use_llm" checked style="width:auto;margin-right:8px"/>启用 LLM 语义增强（更高质量，耗时更长）</label>
+    <div class="row"><button class="btn-primary" id="pubbtn" onclick="doPublish('${id}')">⚡ 一键生成并发布</button>
+      <span id="pubstate" class="muted"></span></div>
+    <div class="progress" style="margin-top:12px"><span id="pubbar"></span></div>
+  </div>
+  <div class="card"><h3>发布历史 / 公开链接</h3><div id="pubhist"><p class="muted">加载中…</p></div></div>`;
+  loadPublishes(id);
+}
+async function doPublish(id){
+  try{
+    el('pubbtn').disabled=true;el('pubstate').textContent='任务提交中…';el('pubbar').style.width='10%';
+    const r=await api.post('/api/business-lines/'+id+'/publish',{force:true,use_llm:el('use_llm').checked});
+    toast('已提交生成任务');pollJob(id,r.job_id);
+  }catch(e){el('pubbtn').disabled=false;el('pubstate').textContent='';toast(e.message,true);}
+}
+async function pollJob(id,jobId){
+  const bar=el('pubbar'),state=el('pubstate');
+  for(let i=0;i<120;i++){
+    await sleep(2000);
+    let job;try{job=await api.get('/api/jobs/'+jobId);}catch(e){continue;}
+    const map={queued:15,running:55,succeeded:100,failed:100};
+    bar.style.width=(map[job.status]||30)+'%';
+    state.textContent='状态：'+job.status+(job.progress?(' · '+job.progress):'');
+    if(job.status==='succeeded'){bar.style.width='100%';state.textContent='✅ 发布完成';el('pubbtn').disabled=false;loadPublishes(id);return;}
+    if(job.status==='failed'){bar.style.width='100%';state.textContent='❌ 失败：'+(job.error||'');el('pubbtn').disabled=false;return;}
+  }
+  state.textContent='仍在运行，可在「发布历史」查看';el('pubbtn').disabled=false;
+}
+async function loadPublishes(id){
+  const box=el('pubhist');if(!box)return;
+  try{
+    const list=await api.get('/api/business-lines/'+id+'/publishes');
+    if(!list.length){box.innerHTML='<p class="muted">尚未发布。点击上方按钮生成并发布第一篇 GEO 产物。</p>';return;}
+    box.innerHTML=list.map(p=>`<div class="card" style="padding:14px">
+      <div class="row"><strong>发布于 ${p.published_at}</strong><span class="spacer"></span></div>
+      ${(p.urls||[]).map(u=>`<div class="urlbox"><a href="${u}" target="_blank">${u}</a>
+        <span class="spacer"></span><button class="btn-ghost btn-sm" onclick="copy('${u}')">复制</button></div>`).join('')||'<p class="muted">无产物</p>'}
+    </div>`).join('');
+  }catch(e){box.innerHTML='<p class="muted">加载失败：'+e.message+'</p>';}
+}
+function copy(t){
+  navigator.clipboard.writeText(t).then(()=>toast('已复制链接')).catch(()=>toast('复制失败',true));
+}
+
+// ---------------- 视图：设置 ----------------
+async function viewBLSettings(id,bl){
+  const box=el('blbody');
+  box.innerHTML=`<div class="card">
+    <h3>业务线设置</h3>
+    <label>名称</label><input id="s_name" value="${esc(bl.name||'')}"/>
+    <label>简介</label><input id="s_desc" value="${esc(bl.description||'')}"/>
+    <label>域名</label><input id="s_domain" value="${esc(bl.domain||'')}"/>
+    <label>语言</label><input id="s_lang" value="${esc(bl.language||'zh-CN')}"/>
+    <label>主题（每行一个）</label><textarea id="s_topics" style="min-height:80px">${(bl.topics||[]).join('\n')}</textarea>
+    <label>目标受众（每行一个）</label><textarea id="s_aud" style="min-height:80px">${(bl.audience||[]).join('\n')}</textarea>
+    <div class="row"><button class="btn-primary" onclick="saveBL('${id}')">保存设置</button></div>
+  </div>`;
+}
+async function saveBL(id){
+  try{
+    const body={name:el('s_name').value.trim(),description:el('s_desc').value.trim(),
+      domain:el('s_domain').value.trim(),language:el('s_lang').value.trim(),
+      topics:lines(el('s_topics').value),audience:lines(el('s_aud').value)};
+    await api.put('/api/business-lines/'+id,body);
+    toast('设置已保存');viewBL(id);
+  }catch(e){toast(e.message,true);}
+}
+async function delBL(id){
+  if(!confirm('确认删除业务线「'+id+'」？其内容与已发布产物将一并清除。'))return;
+  try{await api.del('/api/business-lines/'+id);toast('已删除');go('#/');}catch(e){toast(e.message,true);}
+}
+
+// ---------------- 辅助 ----------------
+function lines(s){return s.split('\n').map(x=>x.trim()).filter(Boolean);}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+let authMode='login', tab='overview';
+
+// ---------------- 路由 ----------------
+function render(){
+  const hash=location.hash||'#/login';
+  if(!api.token){viewAuth();return;}
+  if(hash==='#/login'){location.hash='#/';}
+  const m=hash.match(/^#\/bl\/([^/]+)(\/content\/([^/]+))?$/);
+  if(m){viewBL(m[1]);return;}
+  if(hash==='#/'||hash===''){viewHome();return;}
+  viewHome();
+}
+window.addEventListener('hashchange',render);
+window.addEventListener('DOMContentLoaded',render);
+if(document.readyState!=='loading')render();
+</script>
+</body>
+</html>

@@ -11,19 +11,24 @@
 from __future__ import annotations
 
 import os
+import json
 import time
 import uuid
+import shutil
+import mimetypes
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.staticfiles import StaticFiles
 
 from . import (
     ACCESS_TOKEN_MIN,
     BASE_URL,
     CORS_ORIGINS,
+    PUBLISHED_DIR,
     REFRESH_TOKEN_DAYS,
     ensure_base_dirs,
 )
@@ -35,11 +40,19 @@ from .schemas import (
     ArtifactOut,
     BusinessLineIn,
     BusinessLineOut,
+    BusinessLineUpdate,
+    ContentDelete,
+    ContentGet,
     ContentIn,
+    ContentMeta,
+    ContentUpdate,
     JobOut,
     LoginRequest,
     MessageResponse,
     OAuthStartResponse,
+    PublishOut,
+    PublishRecord,
+    PublishRequest,
     RefreshRequest,
     RegisterRequest,
     RunRequest,
@@ -56,6 +69,9 @@ from .security import (
 from .tenant import TenantContext, TenantStore, validate_id
 from geo_engine.config import dump_config
 from geo_engine.models import slugify, utcnow
+
+#: 前端静态资源目录（SPA：index.html + app.js + style.css）
+_STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 ensure_base_dirs()
 
@@ -312,9 +328,90 @@ def get_business_line(bl: str, tenant: TenantContext = Depends(get_current_tenan
     return obj.to_dict()
 
 
-@app.put("/api/business-lines/{bl}/content", response_model=MessageResponse)
-def put_content(bl: str, body: ContentIn,
-                tenant: TenantContext = Depends(get_current_tenant)):
+# ---------------------------------------------------------------- 内容管理辅助
+def _safe_content_name(name: str) -> str:
+    """把内容文件名规整为安全文件名（带 .md，禁止路径穿越）。"""
+    name = os.path.basename(name.strip())
+    if not name or ".." in name or "/" in name or "\\" in name or name.startswith("."):
+        raise HTTPException(status_code=400, detail="非法的文件名")
+    if not name.endswith(".md"):
+        name += ".md"
+    return name
+
+
+def _content_path(tenant: TenantContext, bl_id: str, name: str) -> str:
+    bl_id = validate_id(bl_id, "business_line")
+    return os.path.join(tenant.content_dir(bl_id), _safe_content_name(name))
+
+
+def _parse_content_file(path: str) -> ContentGet:
+    base = os.path.splitext(os.path.basename(path))[0]
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = f.read()
+    except OSError:
+        return ContentGet(name=base, title="", authority=2, content="")
+    title, authority, content = "", 2, raw
+    if raw.startswith("---"):
+        end = raw.find("\n---", 3)
+        if end != -1:
+            fm = raw[3:end].strip()
+            body = raw[end + 4:].lstrip("\n")
+            meta: Dict[str, str] = {}
+            for line in fm.splitlines():
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    meta[k.strip()] = v.strip()
+            title = meta.get("title", "")
+            try:
+                authority = int(meta.get("authority", "2") or 2)
+            except ValueError:
+                authority = 2
+            content = body
+    return ContentGet(name=base, title=title, authority=authority, content=content)
+
+
+def _serialize_content(title: str, authority: int, content: str) -> str:
+    return f"---\ntitle: {title}\nauthority: {authority}\n---\n\n{content}"
+
+
+# ---------------------------------------------------------------- 内容：列表 / 获取 / 新建 / 更新 / 删除
+@app.get("/api/business-lines/{bl}/contents", response_model=List[ContentMeta])
+def list_contents(bl: str, tenant: TenantContext = Depends(get_current_tenant)):
+    bl_id = validate_id(bl, "business_line")
+    cdir = tenant.content_dir(bl_id)
+    if not os.path.isdir(cdir):
+        return []
+    out: List[ContentMeta] = []
+    for fn in sorted(os.listdir(cdir)):
+        if not fn.endswith(".md"):
+            continue
+        full = os.path.join(cdir, fn)
+        try:
+            st = os.stat(full)
+        except OSError:
+            continue
+        parsed = _parse_content_file(full)
+        out.append(ContentMeta(
+            name=parsed.name, title=parsed.title, authority=parsed.authority,
+            size=st.st_size,
+            updated_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(st.st_mtime)),
+        ))
+    return out
+
+
+@app.get("/api/business-lines/{bl}/contents/{name}", response_model=ContentGet)
+def get_content(bl: str, name: str, tenant: TenantContext = Depends(get_current_tenant)):
+    bl_id = validate_id(bl, "business_line")
+    path = _content_path(tenant, bl_id, name)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="内容不存在")
+    return _parse_content_file(path)
+
+
+@app.post("/api/business-lines/{bl}/content", response_model=MessageResponse, status_code=201)
+def create_content(bl: str, body: ContentIn,
+                   tenant: TenantContext = Depends(get_current_tenant)):
     bl_id = validate_id(bl, "business_line")
     try:
         tenant.repo.load(bl_id)
@@ -322,15 +419,37 @@ def put_content(bl: str, body: ContentIn,
         raise HTTPException(status_code=404, detail="业务线不存在")
     cdir = tenant.content_dir(bl_id)
     os.makedirs(cdir, exist_ok=True)
-    fname = slugify(body.title) or "doc"
-    # 避免重名覆盖：追加短随机
-    path = os.path.join(cdir, f"{fname}.md")
-    if os.path.exists(path):
-        path = os.path.join(cdir, f"{fname}-{uuid.uuid4().hex[:6]}.md")
-    meta = f"---\ntitle: {body.title}\nauthority: {body.authority}\n---\n\n"
+    name = body.name or slugify(body.title) or "doc"
+    path = _content_path(tenant, bl_id, name)
+    if os.path.isfile(path):
+        # 新建接口遇重名则追加短随机，避免静默覆盖
+        path = _content_path(tenant, bl_id, f"{name}-{uuid.uuid4().hex[:6]}")
     with open(path, "w", encoding="utf-8") as f:
-        f.write(meta + body.content)
-    return MessageResponse(ok=True, message=f"已写入 {os.path.relpath(path, tenant.root)}")
+        f.write(_serialize_content(body.title, body.authority, body.content))
+    return MessageResponse(ok=True, message=f"已创建内容 {os.path.basename(path)}")
+
+
+@app.put("/api/business-lines/{bl}/content", response_model=MessageResponse)
+def update_content(bl: str, body: ContentUpdate,
+                   tenant: TenantContext = Depends(get_current_tenant)):
+    bl_id = validate_id(bl, "business_line")
+    path = _content_path(tenant, bl_id, body.name)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="内容不存在")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(_serialize_content(body.title, body.authority, body.content))
+    return MessageResponse(ok=True, message=f"已更新内容 {body.name}")
+
+
+@app.delete("/api/business-lines/{bl}/content", response_model=MessageResponse)
+def delete_content(bl: str, body: ContentDelete,
+                   tenant: TenantContext = Depends(get_current_tenant)):
+    bl_id = validate_id(bl, "business_line")
+    path = _content_path(tenant, bl_id, body.name)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="内容不存在")
+    os.remove(path)
+    return MessageResponse(ok=True, message=f"已删除内容 {body.name}")
 
 
 # ---------------------------------------------------------------- 运行 / 作业
@@ -345,6 +464,57 @@ def run_business_line(bl: str, body: RunRequest,
     job_id = job_manager().submit(tenant, bl_id, stages=body.stages,
                                   force=body.force, use_llm=body.use_llm)
     return JobOut(id=job_id, business_line=bl_id, status="queued")
+
+
+# ---------------------------------------------------------------- 业务线：更新 / 删除
+@app.put("/api/business-lines/{bl}", response_model=BusinessLineOut)
+def update_business_line(bl: str, body: BusinessLineUpdate,
+                         tenant: TenantContext = Depends(get_current_tenant)):
+    bl_id = validate_id(bl, "business_line")
+    try:
+        tenant.repo.load(bl_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="业务线不存在")
+    bl_path = os.path.join(tenant.repo.settings.bl_dir(), f"{bl_id}.json")
+    existing: Dict[str, Any] = {}
+    if os.path.isfile(bl_path):
+        try:
+            with open(bl_path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+    raw = body.model_dump(exclude_none=True)
+    raw["id"] = bl_id
+    if not raw.get("sources") and existing.get("sources"):
+        raw["sources"] = existing["sources"]
+    if not raw.get("sources"):
+        raw["sources"] = [{"type": "markdown_dir", "path": f"content/{bl_id}"}]
+    dump_config(raw, bl_path)
+    obj = tenant.repo.load(bl_id)
+    cdir = tenant.content_dir(bl_id)
+    return BusinessLineOut(id=obj.id, name=obj.name, description=obj.description,
+                           domain=obj.domain, sources=len(obj.sources),
+                           has_content=os.path.isdir(cdir) and bool(os.listdir(cdir)))
+
+
+@app.delete("/api/business-lines/{bl}", response_model=MessageResponse)
+def delete_business_line(bl: str, tenant: TenantContext = Depends(get_current_tenant)):
+    bl_id = validate_id(bl, "business_line")
+    try:
+        tenant.repo.load(bl_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="业务线不存在")
+    bl_dir = tenant.repo.settings.bl_dir()
+    bl_file = os.path.join(bl_dir, f"{bl_id}.json")
+    if os.path.isfile(bl_file):
+        os.remove(bl_file)
+    for d in (tenant.content_dir(bl_id), tenant.dist_dir(bl_id), tenant.report_dir(bl_id)):
+        if os.path.isdir(d):
+            shutil.rmtree(d)
+    pub = os.path.join(PUBLISHED_DIR, bl_id)
+    if os.path.isdir(pub):
+        shutil.rmtree(pub)
+    return MessageResponse(ok=True, message=f"已删除业务线 {bl_id}")
 
 
 @app.get("/api/jobs/{job_id}", response_model=JobOut)
@@ -410,6 +580,45 @@ def get_report(bl: str, tenant: TenantContext = Depends(get_current_tenant)):
         return {"file": latest, "text": f.read()[:20000]}
 
 
+# ---------------------------------------------------------------- 发布（生成并对外公开）
+@app.post("/api/business-lines/{bl}/publish", response_model=PublishOut, status_code=202)
+def publish_business_line(bl: str, body: PublishRequest,
+                          tenant: TenantContext = Depends(get_current_tenant)):
+    bl_id = validate_id(bl, "business_line")
+    try:
+        tenant.repo.load(bl_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="业务线不存在")
+    # 触发生成任务并标记发布：任务成功后由 jobs._publish_artifacts 复制到公开目录
+    job_id = job_manager().submit(tenant, bl_id, stages=body.stages,
+                                  force=body.force, use_llm=body.use_llm, publish=True)
+    return PublishOut(job_id=job_id, business_line=bl_id, status="queued",
+                      urls=_published_urls(bl_id))
+
+
+@app.get("/api/business-lines/{bl}/publishes", response_model=List[PublishRecord])
+def list_publishes(bl: str, tenant: TenantContext = Depends(get_current_tenant)):
+    bl_id = validate_id(bl, "business_line")
+    rows = tenant.store().get_publishes(bl_id)
+    return [PublishRecord(id=r["id"], business_line=r["business_line"],
+                          urls=r.get("urls") or [], published_at=r.get("published_at", ""),
+                          job_id=r.get("job_id", "")) for r in rows]
+
+
+def _published_urls(bl_id: str) -> List[str]:
+    """列出该业务线公开目录已有产物对应的 URL（供前端预展示）。"""
+    d = os.path.join(PUBLISHED_DIR, bl_id)
+    urls: List[str] = []
+    if not os.path.isdir(d):
+        return urls
+    for root, _, files in os.walk(d):
+        for fn in files:
+            full = os.path.join(root, fn)
+            rel = os.path.relpath(full, d).replace("\\", "/")
+            urls.append(f"{BASE_URL}/p/{bl_id}/{rel}")
+    return sorted(urls)
+
+
 # ---------------------------------------------------------------- 内部工具
 def _file_sha1(path: str) -> str:
     import hashlib
@@ -418,3 +627,43 @@ def _file_sha1(path: str) -> str:
         for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+# ---------------------------------------------------------------- 公开发布产物（无需鉴权，供 AI 抓取）
+@app.get("/p/{bl}/{path:path}")
+def serve_public(bl: str, path: str):
+    bl_id = validate_id(bl, "business_line")
+    full = os.path.normpath(os.path.join(PUBLISHED_DIR, bl_id, path))
+    base = os.path.normpath(os.path.join(PUBLISHED_DIR, bl_id))
+    if not full.startswith(base + os.sep) and full != base:
+        raise HTTPException(status_code=400, detail="非法路径")
+    if not os.path.isfile(full):
+        raise HTTPException(status_code=404, detail="产物不存在")
+    ctype, _ = mimetypes.guess_type(full)
+    return FileResponse(full, media_type=ctype or "application/octet-stream")
+
+
+@app.get("/p/{bl}")
+def serve_public_index(bl: str):
+    bl_id = validate_id(bl, "business_line")
+    d = os.path.join(PUBLISHED_DIR, bl_id)
+    if not os.path.isdir(d):
+        raise HTTPException(status_code=404, detail="尚未发布")
+    files = sorted(os.listdir(d))
+    return {"business_line": bl_id, "files": files, "base": f"{BASE_URL}/p/{bl_id}"}
+
+
+# ---------------------------------------------------------------- 前端 SPA 托管
+@app.get("/")
+def index_root():
+    return FileResponse(os.path.join(_STATIC_DIR, "index.html"), media_type="text/html")
+
+
+@app.get("/app")
+@app.get("/app/{full_path:path}")
+def index_app(full_path: str = ""):
+    return FileResponse(os.path.join(_STATIC_DIR, "index.html"), media_type="text/html")
+
+
+if os.path.isdir(_STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")

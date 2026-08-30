@@ -31,6 +31,8 @@ DATA_DIR = os.environ.get("GEO_DATA_DIR") or os.path.join(REPO_ROOT, "data")
 
 CONTROL_DB = os.path.join(DATA_DIR, "control.db")
 TENANTS_DIR = os.path.join(DATA_DIR, "tenants")
+#: 公开发布目录：publish 后的产物复制到此处，由 GET /p/{bl}/{path} 对外提供（无需鉴权）
+PUBLISHED_DIR = os.path.join(DATA_DIR, "published")
 
 #: JWT / 会话配置（务必通过环境变量注入高熵密钥，绝不入库）
 JWT_SECRET = os.environ.get("GEO_JWT_SECRET") or os.environ.get("JWT_SECRET") \

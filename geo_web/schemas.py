@@ -96,3 +96,76 @@ class ArtifactOut(BaseModel):
     path: str
     format: str
     checksum: str = ""
+
+
+# ---------------------------------------------------------------- 内容管理扩展
+class ContentIn(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    content: str = Field(..., description="Markdown 或纯文本正文")
+    authority: int = Field(2, ge=1, le=5)
+    name: str = Field("", description="文件名 slug（留空则按标题自动生成）")
+
+
+class ContentMeta(BaseModel):
+    name: str
+    title: str = ""
+    authority: int = 2
+    size: int = 0
+    updated_at: str = ""
+
+
+class ContentGet(BaseModel):
+    name: str
+    title: str = ""
+    authority: int = 2
+    content: str = ""
+
+
+class ContentUpdate(BaseModel):
+    name: str = Field(..., description="要更新的文件名 slug")
+    title: str = Field(..., min_length=1, max_length=200)
+    content: str = Field(..., description="Markdown 或纯文本正文")
+    authority: int = Field(2, ge=1, le=5)
+
+
+class ContentDelete(BaseModel):
+    name: str = Field(..., description="要删除的文件名 slug")
+
+
+# ---------------------------------------------------------------- 业务线更新
+class BusinessLineUpdate(BaseModel):
+    name: str = ""
+    description: str = ""
+    domain: str = ""
+    language: str = ""
+    topics: List[str] = Field(default_factory=list)
+    audience: List[str] = Field(default_factory=list)
+    competitors: List[str] = Field(default_factory=list)
+    authority: Dict[str, Any] = Field(default_factory=dict)
+    sources: List[Dict[str, Any]] = Field(default_factory=list)
+    targets: List[Dict[str, Any]] = Field(default_factory=list)
+    llm: Dict[str, Any] = Field(default_factory=dict)
+    monitor: Dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------- 发布
+class PublishRequest(BaseModel):
+    stages: Optional[List[str]] = None
+    force: bool = True
+    use_llm: bool = True
+
+
+class PublishOut(BaseModel):
+    job_id: str
+    business_line: str
+    status: str = "queued"
+    urls: List[str] = Field(default_factory=list)
+    published_at: Optional[str] = None
+
+
+class PublishRecord(BaseModel):
+    id: str
+    business_line: str
+    urls: List[str] = Field(default_factory=list)
+    published_at: str = ""
+    job_id: str = ""
