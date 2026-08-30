@@ -38,6 +38,12 @@ from .deps import get_current_tenant
 from .jobs import job_manager
 from .schemas import (
     ArtifactOut,
+    AISettingsIn,
+    AISettingsOut,
+    AIValidateResponse,
+    AICompleteRequest,
+    AIGenerateRequest,
+    AIResearchRequest,
     BusinessLineIn,
     BusinessLineOut,
     BusinessLineUpdate,
@@ -66,6 +72,9 @@ from .security import (
     verify_jwt,
     verify_password,
 )
+from .crypto import encrypt_secret, decrypt_secret, redact
+from .ai import load_settings, validate_key, preset_list, AIError
+from .ai_jobs import ai_job_manager
 from .tenant import TenantContext, TenantStore, validate_id
 from geo_engine.config import dump_config
 from geo_engine.models import slugify, utcnow
@@ -617,6 +626,99 @@ def _published_urls(bl_id: str) -> List[str]:
             rel = os.path.relpath(full, d).replace("\\", "/")
             urls.append(f"{BASE_URL}/p/{bl_id}/{rel}")
     return sorted(urls)
+
+
+# ---------------------------------------------------------------- 用户 AI 配置与能力
+@app.get("/api/ai/settings", response_model=AISettingsOut)
+def get_ai_settings(tenant: TenantContext = Depends(get_current_tenant)):
+    row = tenant.store().get_ai_settings()
+    if not row:
+        return AISettingsOut(presets=preset_list())
+    extra = {}
+    if row.get("extra"):
+        try:
+            extra = json.loads(row["extra"])
+        except (ValueError, TypeError):
+            extra = {}
+    return AISettingsOut(
+        provider=row.get("provider") or "",
+        base_url=row.get("base_url") or "",
+        model=row.get("model") or "",
+        has_key=bool(row.get("api_key_enc")),
+        api_key_masked=redact(decrypt_secret(row.get("api_key_enc") or "")) if row.get("api_key_enc") else "",
+        search_provider=row.get("search_provider") or "none",
+        has_search_key=bool(row.get("search_key_enc")),
+        search_key_masked=redact(decrypt_secret(row.get("search_key_enc") or "")) if row.get("search_key_enc") else "",
+        validated=bool(row.get("validated")),
+        validated_at=row.get("validated_at") or "",
+        temperature=float(extra.get("temperature", 0.7)),
+        note=extra.get("note", ""),
+        presets=preset_list(),
+    )
+
+
+@app.put("/api/ai/settings", response_model=MessageResponse)
+def put_ai_settings(body: AISettingsIn, tenant: TenantContext = Depends(get_current_tenant)):
+    existing = tenant.store().get_ai_settings() or {}
+    api_key_enc = existing.get("api_key_enc") or ""
+    if body.api_key and body.api_key != "***":
+        api_key_enc = encrypt_secret(body.api_key)
+    search_key_enc = existing.get("search_key_enc") or ""
+    if body.search_key and body.search_key != "***":
+        search_key_enc = encrypt_secret(body.search_key)
+    tenant.store().save_ai_settings({
+        "provider": body.provider,
+        "base_url": body.base_url,
+        "model": body.model,
+        "api_key_enc": api_key_enc,
+        "search_provider": body.search_provider,
+        "search_key_enc": search_key_enc,
+        "extra": json.dumps({"temperature": body.temperature, "note": body.note}, ensure_ascii=False),
+        # 密钥变更后视为需重新校验
+        "validated": 0,
+        "validated_at": "",
+        "updated_at": utcnow(),
+    })
+    return MessageResponse(ok=True, message="AI 配置已保存（修改密钥后请重新「测试连接」）")
+
+
+@app.post("/api/ai/settings/validate", response_model=AIValidateResponse)
+def validate_ai_settings(tenant: TenantContext = Depends(get_current_tenant)):
+    settings = load_settings(tenant.store())
+    if not settings:
+        raise HTTPException(status_code=400, detail="请先在 AI 配置中填写并保存设置")
+    if settings.get("provider") != "ollama" and not settings.get("api_key"):
+        raise HTTPException(status_code=400, detail="缺少 API Key，无法校验")
+    ok, msg = validate_key(settings)
+    row = tenant.store().get_ai_settings() or {}
+    row["validated"] = 1 if ok else 0
+    row["validated_at"] = utcnow() if ok else ""
+    tenant.store().save_ai_settings(row)
+    return AIValidateResponse(ok=ok, message=msg)
+
+
+@app.delete("/api/ai/settings", response_model=MessageResponse)
+def delete_ai_settings(tenant: TenantContext = Depends(get_current_tenant)):
+    tenant.store().delete_ai_settings()
+    return MessageResponse(ok=True, message="AI 配置（含密钥）已删除")
+
+
+@app.post("/api/ai/complete", response_model=JobOut, status_code=202)
+def ai_complete_endpoint(body: AICompleteRequest, tenant: TenantContext = Depends(get_current_tenant)):
+    job_id = ai_job_manager().submit(tenant, "ai_complete", body.model_dump())
+    return JobOut(id=job_id, business_line=body.business_line or "ai", status="queued")
+
+
+@app.post("/api/ai/generate", response_model=JobOut, status_code=202)
+def ai_generate_endpoint(body: AIGenerateRequest, tenant: TenantContext = Depends(get_current_tenant)):
+    job_id = ai_job_manager().submit(tenant, "ai_generate", body.model_dump())
+    return JobOut(id=job_id, business_line=body.business_line or "ai", status="queued")
+
+
+@app.post("/api/ai/research", response_model=JobOut, status_code=202)
+def ai_research_endpoint(body: AIResearchRequest, tenant: TenantContext = Depends(get_current_tenant)):
+    job_id = ai_job_manager().submit(tenant, "ai_research", body.model_dump())
+    return JobOut(id=job_id, business_line=body.business_line or "ai", status="queued")
 
 
 # ---------------------------------------------------------------- 内部工具

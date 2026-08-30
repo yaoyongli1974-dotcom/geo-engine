@@ -156,6 +156,21 @@ CREATE TABLE IF NOT EXISTS publishes (
     published_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_publishes_bl ON publishes(business_line);
+
+-- ---- 用户自配置的大模型 / 搜索 API（密钥加密存储，单租户一行）
+CREATE TABLE IF NOT EXISTS ai_settings (
+    id TEXT PRIMARY KEY,                 -- 固定 'singleton'
+    provider TEXT,                       -- openai | deepseek | moonshot | ollama | perplexity | custom
+    base_url TEXT,
+    model TEXT,
+    api_key_enc TEXT,                    -- 加密后的 API Key（明文不落库）
+    search_provider TEXT,                -- none | tavily | brave | native
+    search_key_enc TEXT,                 -- 加密后的搜索 API Key
+    extra TEXT,                          -- json（温度、备注等）
+    validated INTEGER DEFAULT 0,         -- 0/1：密钥是否通过连通性校验
+    validated_at TEXT,
+    updated_at TEXT
+);
 """
 
 
@@ -477,6 +492,32 @@ class Store:
                     d["urls"] = json.loads(d["urls"])
                 out.append(d)
             return out
+
+    # ---------------------------------------------------------------- 用户 AI 配置
+    def get_ai_settings(self) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            cur = self._conn.execute("SELECT * FROM ai_settings WHERE id='singleton'")
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def save_ai_settings(self, s: Dict[str, Any]) -> None:
+        cols = ["id", "provider", "base_url", "model", "api_key_enc",
+                "search_provider", "search_key_enc", "extra",
+                "validated", "validated_at", "updated_at"]
+        row = {c: s.get(c) for c in cols}
+        row["id"] = "singleton"
+        placeholders = ", ".join("?" for _ in cols)
+        updates = ", ".join(f"{c}=excluded.{c}" for c in cols if c != "id")
+        with self.tx() as conn:
+            conn.execute(
+                f"INSERT INTO ai_settings ({', '.join(cols)}) VALUES ({placeholders}) "
+                f"ON CONFLICT(id) DO UPDATE SET {updates}",
+                [row[c] for c in cols],
+            )
+
+    def delete_ai_settings(self) -> None:
+        with self.tx() as conn:
+            conn.execute("DELETE FROM ai_settings WHERE id='singleton'")
 
 
 def _cs(text: str) -> str:

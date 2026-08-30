@@ -511,3 +511,40 @@ ssh ubuntu@152.32.135.156 "sudo systemctl restart geo-engine"
 ---
 
 **部署完成。**
+
+---
+
+## 16. 用户自配置大模型 + 联网搜索（AI 助手）
+
+允许登录用户在「个人设置 → AI 配置」中自行接入自己的大模型 API 密钥，随后在内容编辑器内一键使用 AI 完善 / 生成内容，并支持调用 AI 联网搜索、整合外部资料用于创作。
+
+### 16.1 功能清单
+- **密钥自配置**：供应商预设 OpenAI / DeepSeek / Kimi(Moonshot) / Ollama(本地) / Perplexity / 自定义（OpenAI 兼容协议）。填写 API Key + 模型即可。
+- **安全存储**：API Key 以 Fernet(AES-128-CBC+HMAC) 加密落库（`ai_settings` 表），主密钥来自 `GEO_MASTER_KEY`（缺省派生自 `JWT_SECRET`）；对外接口只返回脱敏片段（如 `sk-••••ABCD`），明文不出现在任何响应。
+- **连通性校验**：「测试连接」用一次最小调用验证密钥可用，结果写入 `validated` 状态。
+- **三类 AI 能力**（均为后台作业，前端进度轮询）：
+  - `POST /api/ai/complete` —— 完善 / 续写 / 润色给定内容；
+  - `POST /api/ai/generate` —— 按主题生成结构化内容草稿；
+  - `POST /api/ai/research` —— 联网搜索并整合为带出处引用的调研内容。
+- **联网搜索两种路径**：① 模型自带联网（Perplexity 直接返回联网答案含引用；OpenAI 走 `/v1/responses` + `web_search_preview` 工具）；② 显式搜索 API（Tavily / Brave）检索后由你的模型整合。未配置时给出明确提示。
+- **错误处理**：密钥缺失 / 网络超时 / 模型返回非 2xx / 搜索无结果，均被封装为 `AIError` 并以任务失败原因返回前端，绝不 500 静默崩溃。
+
+### 16.2 代码位置
+- `geo_web/crypto.py` —— 密钥加密 / 解密 / 脱敏（依赖 `cryptography`）。
+- `geo_web/ai.py` —— LLM 客户端 + 供应商预设 + 联网搜索与整合（`AIError`）。
+- `geo_web/ai_jobs.py` —— AI 任务后台管理器（复用 `jobs` 表）。
+- `geo_web/schemas.py` —— `AISettingsIn/Out`、`AIValidateResponse`、`AI*Request`。
+- `geo_web/app.py` —— `/api/ai/settings`（GET/PUT/DELETE）、`/api/ai/settings/validate`、`/api/ai/{complete,generate,research}`。
+- `geo_engine/store.py` —— 新增 `ai_settings` 表及 `get/save/delete_ai_settings`。
+- `geo_web/static/index.html` —— 「AI 配置」视图（顶栏入口 `#/ai`）+ 编辑器内 AI 工具栏（完善 / 生成 / 联网搜索）。
+
+### 16.3 更新部署（相对 §15）
+1. 服务器 venv 补齐依赖：`pip install -r geo_web/requirements.txt`（**新增 `cryptography`**，密钥加密必需）。
+2. 上传改动文件：`geo_web/crypto.py`、`geo_web/ai.py`、`geo_web/ai_jobs.py`、`geo_web/schemas.py`、`geo_web/app.py`、`geo_web/static/index.html`，以及 `geo_engine/store.py`、新建 `geo_web/requirements.txt`。
+3. `sudo systemctl restart geo-engine`。
+4. 建议设置环境变量 `GEO_MASTER_KEY`（高熵随机串）以提升密钥加密强度；未设置时回落到由 `JWT_SECRET` 派生（功能可用，但生产建议独立主密钥）。
+
+### 16.4 注意事项
+- **密钥安全**：加密主密钥与 JWT 同信任边界；生产务必设置独立的 `GEO_MASTER_KEY` 并通过 `.env`（权限 600）注入，切勿入库。
+- **公开产物不鉴权**：`/p/*` 仍对所有人开放，AI 生成内容同样遵循此约束，勿在业务线中放入涉密信息。
+- **联网搜索合规**：使用 Tavily / Brave 等第三方搜索服务请遵守其服务条款与配额；模型自带联网（Perplexity/OpenAI）同理。

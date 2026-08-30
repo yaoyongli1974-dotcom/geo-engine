@@ -43,6 +43,7 @@
   .badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;border:1px solid var(--line)}
   .b-ok{color:var(--brand);border-color:var(--brand)}
   .b-run{color:var(--warn);border-color:var(--warn)}
+  .b-warn{color:var(--warn);border-color:var(--warn)}
   .b-fail{color:var(--danger);border-color:var(--danger)}
   .b-idle{color:var(--muted)}
   .tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);margin:10px 0 18px;flex-wrap:wrap}
@@ -76,6 +77,7 @@
     <div class="row">
       <span class="muted" id="who"></span>
       <button class="btn-ghost btn-sm" onclick="go('#/')">业务线</button>
+      <button class="btn-ghost btn-sm" onclick="go('#/ai')">AI 配置</button>
       <button class="btn-ghost btn-sm" onclick="api.logout()">退出</button>
     </div>
   </div>
@@ -263,6 +265,15 @@ async function editContent(id,name){
     <label>标题</label><input id="c_title" value="${esc(data.title)}"/>
     <label>权威度（1-5，越高越易被 AI 引用）</label><input id="c_auth" type="number" min="1" max="5" value="${data.authority}"/>
     <label>正文（Markdown）</label><textarea id="c_body">${esc(data.content)}</textarea>
+    <div class="card" style="background:var(--panel2);margin:8px 0">
+      <div class="row"><span class="muted">AI 助手：</span>
+        <button class="btn-ghost btn-sm" onclick="aiAssist('complete','${id}')">✨ 完善/续写</button>
+        <button class="btn-ghost btn-sm" onclick="aiAssist('generate','${id}')">📝 生成草稿</button>
+        <button class="btn-ghost btn-sm" onclick="aiAssist('research','${id}')">🌐 联网搜索</button>
+        <span class="spacer"></span><a class="muted" href="#/ai" style="font-size:12px">未配置密钥？</a></div>
+      <div id="aiprog" class="hidden"><div class="progress" style="margin-top:8px"><span id="aibar"></span></div>
+        <p class="muted" id="aistate" style="margin-top:6px"></p></div>
+    </div>
     <div class="row"><button class="btn-primary" onclick="saveContent('${id}','${name}')">保存</button>
       <button class="btn-ghost" onclick="tab='content';viewBL('${id}')">取消</button></div>`;
   el('c_title').focus();
@@ -360,6 +371,134 @@ async function delBL(id){
   try{await api.del('/api/business-lines/'+id);toast('已删除');go('#/');}catch(e){toast(e.message,true);}
 }
 
+// ---------------- 视图：AI 配置（个人） ----------------
+async function viewAISettings(){
+  el('topbar').classList.remove('hidden');
+  el('who').textContent=localStorage.getItem('geo_user')||'';
+  el('app').innerHTML=`<div class="wrap"><div class="row">
+    <button class="btn-ghost btn-sm" onclick="go('#/')">← 返回</button>
+    <h2 style="margin:0">AI 配置（个人）</h2><span class="spacer"></span>
+    <span id="aistatus" class="badge b-idle">加载中…</span></div>
+  <div class="card">
+    <p class="muted">在此接入你自己的大模型 API 密钥。密钥以加密形式存储，仅用于调用你选定的模型，平台不展示明文。配置后可在「内容编辑」中一键 AI 完善 / 生成 / 联网搜索。</p>
+    <label>供应商</label><select id="ai_provider"></select>
+    <label>API Base URL（预设供应商可留空用默认）</label><input id="ai_base" placeholder="https://api.openai.com/v1"/>
+    <label>模型名称</label><input id="ai_model" placeholder="gpt-4o-mini"/>
+    <label>API Key</label><input id="ai_key" type="password" placeholder="sk-...（留空=保留现有密钥）"/>
+    <label>联网搜索</label><select id="ai_search">
+      <option value="none">不使用</option>
+      <option value="native">用模型自带联网（Perplexity / OpenAI 联网）</option>
+      <option value="tavily">Tavily 搜索 API</option>
+      <option value="brave">Brave 搜索 API</option></select>
+    <label>搜索 API Key（选配，按上面选择填写）</label><input id="ai_skey" type="password" placeholder="（留空=保留现有密钥）"/>
+    <label>温度（0-1.5，越高越发散）</label><input id="ai_temp" type="number" min="0" max="1.5" step="0.1" value="0.7"/>
+    <label>备注</label><input id="ai_note" placeholder="可选"/>
+    <div class="row">
+      <button class="btn-primary" onclick="saveAISettings()">保存配置</button>
+      <button class="btn-ghost" id="aivalbtn" onclick="validateAISettings()">测试连接</button>
+      <button class="btn-danger" onclick="deleteAISettings()">删除配置</button>
+    </div>
+    <p class="muted" id="aihint" style="margin-top:10px"></p>
+  </div></div>`;
+  loadAISettings();
+}
+async function loadAISettings(){
+  try{
+    const s=await api.get('/api/ai/settings');
+    const sel=el('ai_provider');
+    sel.innerHTML=s.presets.map(p=>`<option value="${p.id}">${esc(p.label)}${p.web!=='none'?'（自带联网）':''}</option>`).join('');
+    sel.value=s.provider||'custom';
+    el('ai_base').value=s.base_url||'';
+    el('ai_model').value=s.model||'';
+    el('ai_search').value=s.search_provider||'none';
+    el('ai_temp').value=(s.temperature!=null?s.temperature:0.7);
+    el('ai_note').value=s.note||'';
+    const st=el('aistatus');
+    if(s.has_key){
+      st.className='badge '+(s.validated?'b-ok':'b-warn');
+      st.textContent=(s.validated?'已验证':'未验证')+' · 密钥 '+s.api_key_masked;
+    }else{st.className='badge b-idle';st.textContent='未配置密钥';}
+  }catch(e){toast(e.message,true);}
+}
+async function saveAISettings(){
+  try{
+    await api.put('/api/ai/settings',{
+      provider:el('ai_provider').value, base_url:el('ai_base').value.trim(),
+      model:el('ai_model').value.trim(), api_key:el('ai_key').value,
+      search_provider:el('ai_search').value, search_key:el('ai_skey').value,
+      temperature:parseFloat(el('ai_temp').value)||0.7, note:el('ai_note').value.trim(),
+    });
+    toast('AI 配置已保存（如修改了密钥请点「测试连接」）');loadAISettings();
+  }catch(e){toast(e.message,true);}
+}
+async function validateAISettings(){
+  try{
+    el('aivalbtn').disabled=true;
+    const r=await api.post('/api/ai/settings/validate',{});
+    el('aistatus').className='badge '+(r.ok?'b-ok':'b-fail');
+    el('aistatus').textContent=r.message;
+    toast(r.ok?'连接成功':('校验失败：'+r.message),!r.ok);
+    loadAISettings();
+  }catch(e){toast(e.message,true);}finally{el('aivalbtn').disabled=false;}
+}
+async function deleteAISettings(){
+  if(!confirm('确认删除 AI 配置（含密钥）？此操作不可恢复。'))return;
+  try{await api.del('/api/ai/settings',{});toast('已删除');loadAISettings();}catch(e){toast(e.message,true);}
+}
+
+// ---------------- 编辑器内 AI 助手 ----------------
+async function aiAssist(kind, bl){
+  if(kind==='generate'){
+    const t=prompt('生成主题（可留空用当前标题）：', el('c_title')?el('c_title').value:'');
+    if(t===null)return;
+    return aiRun(kind,{business_line:bl, topic:t||(el('c_title')?el('c_title').value:''), tone:'专业严谨', length:'中等'});
+  }
+  if(kind==='research'){
+    const q=prompt('联网搜索与调研的问题：', el('c_title')?el('c_title').value:'');
+    if(q===null)return;
+    return aiRun(kind,{business_line:bl, query:q});
+  }
+  const txt=el('c_body').value;
+  if(!txt.trim())return toast('请先填写部分内容再完善',true);
+  const ins=prompt('完善指令（可留空=润色补全）：','');
+  if(ins===null)return;
+  return aiRun(kind,{business_line:bl, text:txt, instruction:ins});
+}
+async function aiRun(kind, body){
+  const box=el('aiprog'); if(!box)return; box.classList.remove('hidden');
+  el('aibar').style.width='15%'; el('aistate').textContent='提交任务中…';
+  const path={complete:'/api/ai/complete',generate:'/api/ai/generate',research:'/api/ai/research'}[kind];
+  let job;
+  try{job=await api.post(path, body);}catch(e){box.classList.add('hidden');toast(e.message,true);return;}
+  pollAIJob(job.job_id, kind);
+}
+async function pollAIJob(jobId, kind){
+  const bar=el('aibar'), state=el('aistate');
+  for(let i=0;i<90;i++){
+    await sleep(2000);
+    let job; try{job=await api.get('/api/jobs/'+jobId);}catch(e){continue;}
+    const map={queued:25,running:55,succeeded:100,failed:100};
+    bar.style.width=(map[job.status]||35)+'%';
+    state.textContent='状态：'+job.status+(job.progress?(' · '+job.progress):'');
+    if(job.status==='succeeded'){
+      const res=job.result||{}, text=res.text||'';
+      const cur=el('c_body').value;
+      if(kind==='generate'){el('c_body').value=text;}
+      else{
+        let add='\n\n'+text;
+        if((res.sources||[]).length){
+          add+='\n\n## 参考来源\n'+res.sources.map((s,i)=>`${i+1}. [${esc(s.title)||'来源'}](${s.url})`).join('\n');
+        }
+        el('c_body').value=cur+add;
+      }
+      bar.style.width='100%'; state.textContent='✅ AI 已完成，已填入正文，请审阅后保存';
+      toast('AI 处理完成，结果已填入编辑器'); return;
+    }
+    if(job.status==='failed'){bar.style.width='100%';state.textContent='❌ 失败：'+(job.error||'');toast('AI 失败：'+(job.error||''),true);return;}
+  }
+  state.textContent='仍在运行，可稍后重试';
+}
+
 // ---------------- 辅助 ----------------
 function lines(s){return s.split('\n').map(x=>x.trim()).filter(Boolean);}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
@@ -373,6 +512,7 @@ function render(){
   if(hash==='#/login'){location.hash='#/';}
   const m=hash.match(/^#\/bl\/([^/]+)(\/content\/([^/]+))?$/);
   if(m){viewBL(m[1]);return;}
+  if(hash==='#/ai'){viewAISettings();return;}
   if(hash==='#/'||hash===''){viewHome();return;}
   viewHome();
 }

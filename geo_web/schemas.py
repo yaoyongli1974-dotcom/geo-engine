@@ -169,3 +169,54 @@ class PublishRecord(BaseModel):
     urls: List[str] = Field(default_factory=list)
     published_at: str = ""
     job_id: str = ""
+
+
+# ---------------------------------------------------------------- 用户 AI 配置
+class AISettingsIn(BaseModel):
+    provider: str = Field("custom", description="供应商预设：openai/deepseek/moonshot/ollama/perplexity/custom")
+    base_url: str = Field("", description="自定义 API Base URL（预设供应商留空则用默认）")
+    model: str = Field("", description="模型名称")
+    api_key: str = Field("", description="API Key；留空或 '***' 表示保留已有密钥不改")
+    search_provider: str = Field("none", description="联网搜索：none/tavily/brave/native")
+    search_key: str = Field("", description="搜索 API Key；留空或 '***' 表示保留已有")
+    temperature: float = Field(0.7, ge=0.0, le=1.5)
+    note: str = ""
+
+
+class AISettingsOut(BaseModel):
+    provider: str = ""
+    base_url: str = ""
+    model: str = ""
+    has_key: bool = False
+    api_key_masked: str = ""
+    search_provider: str = "none"
+    has_search_key: bool = False
+    search_key_masked: str = ""
+    validated: bool = False
+    validated_at: str = ""
+    temperature: float = 0.7
+    note: str = ""
+    presets: List[Dict[str, str]] = Field(default_factory=list)
+
+
+class AIValidateResponse(BaseModel):
+    ok: bool
+    message: str
+
+
+class AICompleteRequest(BaseModel):
+    business_line: str = ""
+    text: str = Field(..., description="待完善/续写的原文")
+    instruction: str = ""
+
+
+class AIGenerateRequest(BaseModel):
+    business_line: str = ""
+    topic: str = Field(..., description="内容主题")
+    tone: str = "专业严谨"
+    length: str = "中等"
+
+
+class AIResearchRequest(BaseModel):
+    business_line: str = ""
+    query: str = Field(..., description="联网搜索与调研的问题")
