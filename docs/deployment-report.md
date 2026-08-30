@@ -21,6 +21,7 @@
 | 访问验证 | 正常 | `http://152.32.135.156/api/health` 返回 200 |
 | 认证验证 | 正常 | 注册接口返回 access_token/refresh_token |
 | SSH 安全加固 | 正常 | 已部署密钥、禁用密码登录 |
+| 域名 HTTPS | 正常 | geo.xb168.com 已解析并配置 HTTP→HTTPS 重定向，Let's Encrypt 证书有效期至 2026-11-28 |
 
 ---
 
@@ -112,12 +113,13 @@ GEO_JWT_SECRET=<随机生成，长度 64，已写入 .env>
 
 | 入口 | 地址 | 说明 |
 | --- | --- | --- |
-| 健康检查 | `http://152.32.135.156/api/health` | 无需鉴权 |
-| API 根 | `http://152.32.135.156/api/` | 需 Bearer Token |
-| 交互式文档 | `http://152.32.135.156/docs` | Swagger UI |
-| OpenAPI 规范 | `http://152.32.135.156/openapi.json` | 自动生成的接口定义 |
+| 健康检查（域名 HTTPS） | `https://geo.xb168.com/api/health` | 无需鉴权，强制 HTTPS |
+| API 根（域名 HTTPS） | `https://geo.xb168.com/api/` | 需 Bearer Token |
+| 交互式文档 | `https://geo.xb168.com/docs` | Swagger UI |
+| OpenAPI 规范 | `https://geo.xb168.com/openapi.json` | 自动生成的接口定义 |
+| 健康检查（IP HTTP，备用） | `http://152.32.135.156/api/health` | 无需鉴权，仅 HTTP |
 
-> 当前未绑定域名。如需绑定 `geo.xalcy.cn` 或 `www.xalcy.cn`，请在 DNS 解析到 152.32.135.156 后，修改 OpenResty 配置中的 `server_name`。
+> **域名访问**：`geo.xb168.com` 已解析到 `152.32.135.156`，并启用 Let's Encrypt 证书（HTTP 自动 301 跳转到 HTTPS）。所有 API 调用请使用 `https://geo.xb168.com/...`。IP 直连（152.32.135.156）仍仅提供 HTTP，作为内网/备用入口。
 
 ---
 
@@ -164,49 +166,51 @@ sudo docker exec 1Panel-openresty-GeCi nginx -T | grep -E "server_name|proxy_pas
 
 ## 7. 反向代理配置
 
-OpenResty 配置文件位置：
+OpenResty 由 1Panel 以容器方式管理（`1Panel-openresty-GeCi`），其 `conf.d` 在宿主机挂载点为 `/opt/1panel/www/conf.d/`，容器内为 `/usr/local/openresty/nginx/conf/conf.d/`。
 
-- 持久化：`/opt/1panel/www/conf.d/geo-engine.conf`
-- 容器内生效：`/usr/local/openresty/nginx/conf/conf.d/geo-engine.conf`
+> ⚠️ **重要**：修改反向代理配置**只能写 `/opt/1panel/www/conf.d/` 下的文件**。1Panel 会在保存/重载时用它自己的模板重新渲染它所管理的网站配置（如 `geo-engine.conf`），因此**不要直接手写 `geo-engine.conf` 的 `server_name` 等字段**——会被覆盖。域名相关的独立配置应使用单独的文件名（如 `geo-xb168.com.conf`），1Panel 不会覆盖它。
 
-核心规则：
+### 7.1 IP 访问（1Panel 管理，勿手动改 server_name）
+
+- 文件：`/opt/1panel/www/conf.d/geo-engine.conf`（1Panel 渲染，仅 `server_name 152.32.135.156`）
+- 容器内：`/usr/local/openresty/nginx/conf/conf.d/geo-engine.conf`
+
+### 7.2 域名 HTTPS（geo.xb168.com，独立配置）
+
+- 文件：`/opt/1panel/www/conf.d/geo-xb168.com.conf`
+- 逻辑：80 端口对 `/.well-known/acme-challenge` 放行（证书续期用），其余 301 跳 HTTPS；443 端口启用 Let's Encrypt 证书反代到 `127.0.0.1:8000`。
 
 ```nginx
 server {
     listen 80;
-    server_name 152.32.135.156;
+    server_name geo.xb168.com;
+    location ^~ /.well-known/acme-challenge { root /usr/share/nginx/html; allow all; }
+    location / { return 301 https://$host$request_uri; }
+}
 
-    location /api/ {
-        proxy_pass http://127.0.0.1:8000/api/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /docs/ {
-        proxy_pass http://127.0.0.1:8000/docs/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /openapi.json {
-        proxy_pass http://127.0.0.1:8000/openapi.json;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
+server {
+    listen 443 ssl;
+    server_name geo.xb168.com;
+    ssl_certificate /usr/local/openresty/nginx/conf/ssl/geo_xb168_com/fullchain.pem;
+    ssl_certificate_key /usr/local/openresty/nginx/conf/ssl/geo_xb168_com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    location /api/ { proxy_pass http://127.0.0.1:8000/api/; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme; }
+    location /docs/ { proxy_pass http://127.0.0.1:8000/docs/; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme; }
+    location /openapi.json { proxy_pass http://127.0.0.1:8000/openapi.json; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme; }
+    location / { return 200 'GEO Engine is running\n'; add_header Content-Type text/plain; }
 }
 ```
+
+证书存放（宿主机）：`/opt/1panel/apps/openresty/openresty/conf/ssl/geo_xb168_com/`，容器内对应 `/usr/local/openresty/nginx/conf/ssl/geo_xb168_com/`。
+
+ACME webroot（宿主机）：`/opt/1panel/apps/openresty/openresty/root`（容器内 `/usr/share/nginx/html`）。
 
 重载命令：
 
 ```bash
-sudo docker exec 1Panel-openresty-GeCi nginx -t
-sudo docker exec 1Panel-openresty-GeCi nginx -s reload
+sudo docker exec 1Panel-openresty-GeCi openresty -t
+sudo docker exec 1Panel-openresty-GeCi openresty -s reload
 ```
 
 ---
@@ -292,7 +296,7 @@ sudo tar -czf /home/ubuntu/geo-engine-backup-$(date +%Y%m%d-%H%M%S).tar.gz /opt/
 
 - `.env` 文件仍位于服务器磁盘上，请确保服务器磁盘加密或访问控制严格。
 - 聊天记录中的 SSH 密码已失效（密码登录已禁用），但建议不要长期保留相关聊天记录。
-- 当前使用 HTTP 明文传输，如需生产使用，请为 152.32.135.156 或绑定域名申请 TLS 证书。
+- 已为 `geo.xb168.com` 启用 HTTPS（Let's Encrypt，自动续期）。IP 直连（152.32.135.156）仍为 HTTP，如需也可在 1Panel 中为 IP 申请自签/CA 证书（可选，非必须）。
 
 ---
 
@@ -326,8 +330,8 @@ AuthenticationMethods publickey
 
 ## 12. 已知限制与后续建议
 
-1. **TLS/HTTPS**：当前仅启用 HTTP。如需 HTTPS，可在 1Panel 中为 152.32.135.156 或绑定域名申请 Let's Encrypt 证书，并修改 OpenResty 配置。
-2. **域名绑定**：当前使用 IP 访问。建议将 `geo.xalcy.cn` 或 `www.xalcy.cn` 解析到 152.32.135.156，并更新 `GEO_BASE_URL` 和 `GEO_CORS_ORIGINS`。
+1. **TLS/HTTPS**：已为 `geo.xb168.com` 启用（见 §14）。如还需为 IP 或其他域名开启 HTTPS，可在 1Panel 中申请证书并按 §7.2 方式追加 server 块。
+2. **域名绑定**：`geo.xb168.com` 已生效。如需使用 `geo.xalcy.cn` 或 `www.xalcy.cn`，请将域名解析到 152.32.135.156，然后复制 §7.2 的 `geo-xb168.com.conf` 为对应域名文件并重新签发证书即可。
 3. **数据库存储**：当前使用 SQLite，适合中小规模。如租户/并发量增长，可迁移到 MySQL/PostgreSQL。
 4. **磁盘空间**：系统盘仅剩 3.6 GB，建议监控并清理日志，或扩容。
 5. **日志轮转**：当前未配置 `logrotate`，长期运行请为 `/var/log/journal` 或 systemd 日志设置保留策略。
@@ -347,6 +351,66 @@ $ curl -s http://152.32.135.156/api/business-lines -H "Authorization: Bearer <to
 
 $ curl -s http://152.32.135.156/
 GEO Engine is running
+```
+
+---
+
+## 14. 域名与 HTTPS 部署（geo.xb168.com）
+
+### 14.1 DNS 解析
+
+`geo.xb168.com` 已添加 A 记录指向 `152.32.135.156`（服务器本地 `/etc/hosts` 亦已同步）。
+
+```bash
+nslookup geo.xb168.com   # -> 152.32.135.156
+```
+
+### 14.2 证书签发（Let's Encrypt，acme.sh）
+
+证书工具 `acme.sh` 安装在服务器 `/home/ubuntu/.acme.sh/`，使用 webroot 模式（无需停服）：
+
+- Webroot（宿主机）：`/opt/1panel/apps/openresty/openresty/root`（容器内 `/usr/share/nginx/html`）
+- 证书部署目录（宿主机）：`/opt/1panel/apps/openresty/openresty/conf/ssl/geo_xb168_com/`
+- 签发命令：
+
+```bash
+sudo HOME=/home/ubuntu /home/ubuntu/.acme.sh/acme.sh --issue \
+  -d geo.xb168.com --webroot /opt/1panel/apps/openresty/openresty/root --server letsencrypt
+
+sudo HOME=/home/ubuntu /home/ubuntu/.acme.sh/acme.sh --install-cert -d geo.xb168.com \
+  --cert-file /opt/1panel/apps/openresty/openresty/conf/ssl/geo_xb168_com/cert.pem \
+  --key-file  /opt/1panel/apps/openresty/openresty/conf/ssl/geo_xb168_com/privkey.pem \
+  --fullchain-file /opt/1panel/apps/openresty/openresty/conf/ssl/geo_xb168_com/fullchain.pem \
+  --reloadcmd "docker exec 1Panel-openresty-GeCi openresty -s reload"
+```
+
+### 14.3 自动续期
+
+`acme.sh` 安装时已写入 `ubuntu` 用户的 cron（每 6 小时检查，到期前 30 天自动续期）：
+
+```text
+39 4,10,16,22 * * * "/home/ubuntu/.acme.sh"/acme.sh --cron --home "/home/ubuntu/.acme.sh" > /dev/null
+```
+
+续期后通过 `--reloadcmd` 执行 `docker exec 1Panel-openresty-GeCi openresty -s reload` 平滑重载。**已确认 `ubuntu` 用户已加入 `docker` 组**，续期时的 reload 可正常执行，无需人工干预。
+
+证书有效期：约 90 天（本次 `2026-08-30` → `2026-11-28`）。
+
+### 14.4 重定向策略
+
+- `http://geo.xb168.com/*`（除 `/.well-known/acme-challenge`）→ `301` 重定向到 `https://geo.xb168.com/*`
+- `https://geo.xb168.com/*` → 反代 `127.0.0.1:8000`
+- IP 直连 `http://152.32.135.156/*` 仍保持 HTTP（1Panel 管理的 `geo-engine.conf`）
+
+### 14.5 验证命令
+
+```bash
+# HTTP 应 301 跳转
+curl -s -o /dev/null -w '%{http_code} -> %{redirect_url}\n' http://geo.xb168.com/api/health
+# HTTPS 应 200
+curl -s https://geo.xb168.com/api/health
+# 证书信息
+sudo openssl x509 -in /opt/1panel/apps/openresty/openresty/conf/ssl/geo_xb168_com/fullchain.pem -noout -dates -subject
 ```
 
 ---
